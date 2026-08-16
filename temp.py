@@ -133,7 +133,7 @@ def generate_answer_v3(query, vector_db: Chroma):
 
 if __name__ == '__main__':
     load_dotenv()
-    query = "거리가 10이하인 수요처가 어디야?"
+    query = "연마 공정에서 발생한 실리카가 포함된 공정 부산물"
     data_db = generate_db2(data)
     
     answer, similarity, meta = generate_answer_v3(query, data_db)
