@@ -12,7 +12,7 @@ from google import genai
 from google.genai import types
 from chatbot import generate_answer_v3
 
-data_path = './data/example.json'
+data_path = './data/demands.json'
 
 with open(data_path, 'r', encoding='utf-8') as f:
     data = json.load(f)
@@ -43,10 +43,22 @@ def generate_db2(docs:json):
     
     documents = [
         Document(
-            page_content = json.dumps(doc['수요'],ensure_ascii=False),
+            page_content = (
+                f"필요 자원: {doc['product_name']}"
+                f"사용 목적: {doc['use_case']}"
+                f"허용 조건: {', '.join(doc['accepted_conditions'])}"
+            ),
             metadata={
-                'index':doc['index'],
-                'company_id':doc['company_id']
+                "demand_id": doc['demand_id'],
+                "company_name": doc['company_name'],
+                "quantity_min": doc['quantity']['min'],
+                "quantity_max": doc['quantity']['max'],
+                "unit": doc['quantity']['unit'],
+                "required_information": doc['required_information'],
+                "region": doc['location']['region'],
+                "city": doc['location']['city'],
+                "status": doc['status'],
+                "source_badge": doc['source_badge']
             }
         ) for doc in docs
     ]
@@ -68,6 +80,8 @@ def generate_answer_v3(query, vector_db: Chroma):
             )
     docs = [doc for doc,_ in results]
     scores = [score for _,score in results]
+    
+    #doc, score = results[0]
         
     context = '\n'.join([doc.page_content for doc in docs])
     client = genai.Client(
@@ -115,14 +129,15 @@ def generate_answer_v3(query, vector_db: Chroma):
             response_mime_type = 'application/json'
         )
     )
-    return response.candidates[0].content.parts[0].text, max(scores)
+    return response.candidates[0].content.parts[0].text, max(scores), docs[0].metadata
 
 if __name__ == '__main__':
     load_dotenv()
     query = "거리가 10이하인 수요처가 어디야?"
     data_db = generate_db2(data)
     
-    answer, similarity = generate_answer_v3(query, data_db)
+    answer, similarity, meta = generate_answer_v3(query, data_db)
     
     print(answer)
     print(f"RAG 유사도: {similarity:.3f}")
+    print(meta)
