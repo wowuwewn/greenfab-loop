@@ -35,7 +35,7 @@ export const RESOURCE_CONFIRMATION: ResourceConfirmation = {
   status: 'PENDING',
   confirmed_by: null,
   confirmed_at: null,
-  source_type: 'REAL',
+  source_type: 'DEMO',
 }
 
 export const VALIDATION_METRICS: ValidationMetrics = {

@@ -6,16 +6,22 @@ import { WorkflowStepper } from '../components/WorkflowStepper'
 import {
   DETECT_ANALYSIS,
   PRIORITY_CASE,
-  RESOURCE_CONFIRMATION,
   VALIDATION_METRICS,
   WORKFLOW_STEPS,
 } from '../data/detectData'
+import type { ResourceConfirmation } from '../types/loop'
 
 interface DetectPageProps {
   onBackToOverview: () => void
+  onGoToConfirm: () => void
+  resourceConfirmation: ResourceConfirmation
 }
 
-export function DetectPage({ onBackToOverview }: DetectPageProps) {
+export function DetectPage({
+  onBackToOverview,
+  onGoToConfirm,
+  resourceConfirmation,
+}: DetectPageProps) {
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -55,7 +61,7 @@ export function DetectPage({ onBackToOverview }: DetectPageProps) {
         <DetectFlow
           analysis={DETECT_ANALYSIS}
           priorityCase={PRIORITY_CASE}
-          resourceConfirmation={RESOURCE_CONFIRMATION}
+          resourceConfirmation={resourceConfirmation}
         />
 
         <div className="content-grid">
@@ -66,7 +72,8 @@ export function DetectPage({ onBackToOverview }: DetectPageProps) {
           <PriorityCaseCard
             analysis={DETECT_ANALYSIS}
             priorityCase={PRIORITY_CASE}
-            resourceConfirmation={RESOURCE_CONFIRMATION}
+            resourceConfirmation={resourceConfirmation}
+            onGoToConfirm={onGoToConfirm}
           />
         </div>
 
