@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { ArrowRight, CheckCircle2 } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import type {
   DetectAnalysis,
   DetectCase,
@@ -10,6 +9,7 @@ interface PriorityCaseCardProps {
   analysis: DetectAnalysis
   priorityCase: DetectCase
   resourceConfirmation: ResourceConfirmation
+  onGoToConfirm: () => void
 }
 
 const formatNumber = new Intl.NumberFormat('ko-KR')
@@ -18,9 +18,8 @@ export function PriorityCaseCard({
   analysis,
   priorityCase,
   resourceConfirmation,
+  onGoToConfirm,
 }: PriorityCaseCardProps) {
-  const [showNotice, setShowNotice] = useState(false)
-
   return (
     <section className="priority-card" aria-labelledby="priority-title">
       <div className="priority-card__topline">
@@ -55,19 +54,11 @@ export function PriorityCaseCard({
       <button
         className="primary-button"
         type="button"
-        onClick={() => setShowNotice(true)}
+        onClick={onGoToConfirm}
       >
         확인 단계로 이동
         <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
       </button>
-
-      <div
-        className={`inline-notice${showNotice ? ' is-visible' : ''}`}
-        aria-live="polite"
-      >
-        <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
-        <span>Confirm 화면은 다음 단계에서 연결됩니다.</span>
-      </div>
     </section>
   )
 }
