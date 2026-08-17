@@ -36,3 +36,6 @@ Desktop.ini
 *.temp
 *.swp
 *~
+
+# 크로마 DB
+chroma_db/

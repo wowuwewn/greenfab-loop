@@ -12,7 +12,7 @@ from google import genai
 from google.genai import types
 from chatbot import generate_answer_v3
 
-data_path = './data/demands.json'
+data_path = '../../data/demo/demands.json'
 
 with open(data_path, 'r', encoding='utf-8') as f:
     data = json.load(f)
@@ -175,7 +175,7 @@ if __name__ == '__main__':
     #query = "연마 공정에서 발생한 실리카가 포함된 공정 부산물"
     data_db = generate_db2(data)
     
-    with open('./data/passport.json', 'r', encoding='utf-8') as f:
+    with open('../../data/demo/passport.json', 'r', encoding='utf-8') as f:
         passport = json.load(f)
    
     query = passport['resource_description']    
