@@ -34,20 +34,20 @@ export function DetectFlow({
 }: DetectFlowProps) {
   const nodes: FlowNode[] = [
     {
-      title: analysis.dataset_name,
-      detail: `${formatNumber.format(analysis.total_cases)}건`,
+      title: '제조 데이터',
+      detail: `${analysis.dataset_name} · ${formatNumber.format(analysis.total_cases)}건`,
       icon: Database,
       tone: 'source',
     },
     {
-      title: analysis.model_name,
-      detail: '모델 점수 기반 우선순위',
+      title: '위험 우선순위 분석',
+      detail: `${analysis.model_name} · 모델 점수 기준`,
       icon: ScanLine,
       tone: 'model',
     },
     {
-      title: priorityCase.case_id,
-      detail: `검토 우선순위 ${priorityCase.risk_rank}위`,
+      title: '우선 검토 생산 건',
+      detail: `${priorityCase.case_id} · 검토 우선순위 ${priorityCase.risk_rank}위`,
       icon: Target,
       tone: 'priority',
     },
@@ -86,7 +86,7 @@ export function DetectFlow({
               {index < nodes.length - 1 && (
                 <div className="flow-connector" aria-hidden="true">
                   <span />
-                  <ArrowRight size={16} strokeWidth={1.6} />
+                  <ArrowRight size={18} strokeWidth={2.1} />
                 </div>
               )}
             </li>

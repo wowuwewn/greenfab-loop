@@ -7,12 +7,12 @@ import type {
 } from '../types/loop'
 
 export const WORKFLOW_STEPS: WorkflowStep[] = [
-  { id: '01', label: 'Detect' },
-  { id: '02', label: 'Confirm' },
-  { id: '03', label: 'Passport' },
-  { id: '04', label: 'Match' },
-  { id: '05', label: 'Review' },
-  { id: '06', label: 'Receipt' },
+  { id: '01', label: '위험 선별' },
+  { id: '02', label: '현장 확인' },
+  { id: '03', label: '자원 정보' },
+  { id: '04', label: '후보 탐색' },
+  { id: '05', label: '최종 검토' },
+  { id: '06', label: '결과 기록' },
 ]
 
 export const DETECT_ANALYSIS: DetectAnalysis = {
