@@ -184,6 +184,7 @@ if __name__ == '__main__':
     
     report = rule_check(docs, passport)
     print(report)
+    ####
     #print([(doc.page_content, doc.metadata, score) for doc,score in zip(docs,scores)])
     #print(type(docs))
     
