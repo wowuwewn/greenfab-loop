@@ -1,0 +1,264 @@
+{
+  "metadata": {
+    "dataset_id": "greenfab-loop-synthetic-v1",
+    "version": "2026-08-17",
+    "provenance": "SYNTHETIC_DEMO",
+    "notice": "자원·수요 프로필과 기대 후보는 MVP 검색 흐름을 검증하기 위해 팀이 구성한 합성 데이터입니다. 실제 재활용 적합성, 안전성 또는 법적 허용을 의미하지 않습니다."
+  },
+  "resources": [
+    {
+      "id": "R01",
+      "name": "실리카 함유 공정 부산물",
+      "description": "반도체 세정 공정에서 회수된 미세 무기질 분말. 이산화규소 비중이 높고 소량의 금속 성분 가능성이 있어 성분 분석 후 세라믹 충전재 또는 무기 소재 원료로 검토가 필요함.",
+      "state": "건조 분말",
+      "quantityKg": 12,
+      "location": "제조동 A",
+      "availableOn": "2026-08-18",
+      "analysisStatus": "금속 성분 정밀 분석 필요",
+      "composition": "이산화규소 중심 합성 DEMO 성분표(미량 금속 분석 항목 포함)",
+      "expectedDemandId": "D01"
+    },
+    {
+      "id": "R02",
+      "name": "반복 발생 폐골판지 포장재",
+      "description": "부품 입고 후 매주 발생하는 오염이 적은 골판지 상자. 압축 보관 가능하며 제지용 회수 원료나 완충 포장재로 재사용할 수 있는 후보.",
+      "expectedDemandId": "D03"
+    },
+    {
+      "id": "R03",
+      "name": "사용 가능한 목재 물류 팔레트",
+      "description": "설비 부품 운송 후 남은 목재 받침대. 파손이 경미하고 규격이 일정하여 보수 후 물류용 운반 받침으로 다시 사용할 수 있음.",
+      "expectedDemandId": "D05"
+    },
+    {
+      "id": "R04",
+      "name": "저온 폐열 온수",
+      "description": "냉각 공정에서 지속적으로 배출되는 약 70~85도 범위의 온수 열원. 인근 세척, 건조 또는 시설 난방 공정의 예열 에너지로 검토 가능.",
+      "expectedDemandId": "D07"
+    },
+    {
+      "id": "R05",
+      "name": "IPA 계열 사용후 용제",
+      "description": "세정 후 회수된 이소프로필알코올 계열 액상 용제. 수분과 미량 불순물이 포함되어 증류 정제 후 세정용 재생용제로 활용 가능성 검토가 필요함.",
+      "expectedDemandId": "D09"
+    },
+    {
+      "id": "R06",
+      "name": "알루미늄 절삭 스크랩",
+      "description": "부품 가공에서 발생한 알루미늄 칩과 작은 조각. 절삭유 제거와 합금 계열 확인 후 용해 원료로 회수 가능한 금속 부산물.",
+      "expectedDemandId": "D11"
+    },
+    {
+      "id": "R07",
+      "name": "붕규산 폐유리 조각",
+      "description": "검사 지그 교체 과정에서 발생한 내열 유리 파편. 이물 선별과 세척 후 유리 원료 또는 발포 유리 시험재로 검토할 수 있음.",
+      "expectedDemandId": "D13"
+    },
+    {
+      "id": "R08",
+      "name": "칼슘 성분 함유 무기 슬러지",
+      "description": "폐수 중화 과정에서 발생한 함수율 높은 무기성 침전물. 칼슘계 성분이 포함되어 있으며 건조·유해성 확인 후 시멘트 보조 원료 가능성 검토가 필요함.",
+      "expectedDemandId": "D15"
+    },
+    {
+      "id": "R09",
+      "name": "투명 PET 보호 필름",
+      "description": "제품 포장 해체 후 발생한 라벨과 접착제가 거의 없는 투명 폴리에스터 필름. 세척·압축 후 재생 플라스틱 원료 후보.",
+      "expectedDemandId": "D17"
+    },
+    {
+      "id": "R10",
+      "name": "건조기 배기 폐열",
+      "description": "제품 건조 설비에서 배출되는 따뜻한 공기 열원. 열교환기를 거쳐 공정 급기나 원료 사전 건조에 재사용할 수 있는 에너지 부산물.",
+      "expectedDemandId": "D19"
+    },
+    {
+      "id": "R11",
+      "name": "사용후 윤활유",
+      "description": "설비 유지보수 과정에서 회수한 산업용 윤활유. 금속분과 수분 제거, 품질 분석 후 재생 기유 또는 보조 연료 원료로 검토 필요.",
+      "expectedDemandId": "D21"
+    },
+    {
+      "id": "R12",
+      "name": "폐동 케이블과 구리선",
+      "description": "설비 개조 후 발생한 피복 전선과 구리 케이블 조각. 피복 분리 후 동 제련 또는 재생 구리 원료로 회수 가능한 금속 자원.",
+      "expectedDemandId": "D23"
+    }
+  ],
+  "demands": [
+    {
+      "id": "D01",
+      "company": "제주 세라믹랩",
+      "title": "무기 충전재 파일럿 원료",
+      "description": "세라믹 복합재 연구를 위해 규소계 미분말을 5~20kg 단위로 찾고 있음. 성분표 확인과 실험실 적합성 시험 후 소량 파일럿 사용 가능.",
+      "quantityRangeKg": [5, 20],
+      "distanceKm": 18,
+      "requiresAnalysis": true,
+      "materialFamily": "silica"
+    },
+    {
+      "id": "D02",
+      "company": "그린콘소재",
+      "title": "건설용 무기 혼화재 연구",
+      "description": "콘크리트 배합 시험용 무기질 미분 원료를 검토함. 10kg 이상 필요하며 중금속·입도·수분 자료가 있어야 검토 가능.",
+      "quantityRangeKg": [10, 50],
+      "distanceKm": 42,
+      "requiresAnalysis": true,
+      "materialFamily": "mineral"
+    },
+    {
+      "id": "D03",
+      "company": "한라리페이퍼",
+      "title": "재생지 생산용 회수지",
+      "description": "물기에 젖지 않고 테이프와 이물질을 제거한 갈색 포장 상자를 정기적으로 매입. 압축된 제지 섬유 원료 수요.",
+      "materialFamily": "paper"
+    },
+    {
+      "id": "D04",
+      "company": "에코패키징",
+      "title": "완충재 재사용 상자",
+      "description": "소형 제품 포장에 다시 사용할 깨끗한 상자와 종이 완충재를 모집함. 규격별 분류가 필요.",
+      "materialFamily": "paper"
+    },
+    {
+      "id": "D05",
+      "company": "제주로지스",
+      "title": "중고 운송용 받침대",
+      "description": "보수 가능한 목재 운반대와 지게차용 적재 받침을 정기 구매. 규격과 파손 상태 사진 확인 필요.",
+      "materialFamily": "wood"
+    },
+    {
+      "id": "D06",
+      "company": "업사이클퍼니처",
+      "title": "재생 목재 가구 소재",
+      "description": "못과 오염을 제거할 수 있는 산업용 목재판과 각재를 가구 시험 제작에 사용.",
+      "materialFamily": "wood"
+    },
+    {
+      "id": "D07",
+      "company": "온실에너지협동조합",
+      "title": "시설 난방 예열 열원",
+      "description": "인근 온실의 급수와 난방을 예열할 60도 이상의 안정적인 온수 열원을 찾고 있음. 유량과 공급시간 확인 필요.",
+      "materialFamily": "heat"
+    },
+    {
+      "id": "D08",
+      "company": "클린워시",
+      "title": "세척수 가열 에너지",
+      "description": "산업 세척 공정의 초기 물 가열에 사용할 저온 잉여 열 또는 온수 회수원을 검토함.",
+      "materialFamily": "heat"
+    },
+    {
+      "id": "D09",
+      "company": "리솔브케미칼",
+      "title": "재생 세정액 증류 원료",
+      "description": "알코올계 폐세정액을 증류 정제해 재생 용제로 생산. 수분 함량과 할로겐·불순물 분석표 필요.",
+      "materialFamily": "solvent"
+    },
+    {
+      "id": "D10",
+      "company": "바이오추출연구소",
+      "title": "에탄올 계열 추출 용매",
+      "description": "식품 연구용 고순도 에탄올 원료 수요. 산업 폐용제는 사용 불가하며 식품 규격 인증 필요.",
+      "materialFamily": "solvent-food"
+    },
+    {
+      "id": "D11",
+      "company": "제주메탈리턴",
+      "title": "비철금속 용해 원료",
+      "description": "합금 계열이 확인되고 절삭유이 제거된 경량 금속 칩을 재용해 원료로 매입.",
+      "materialFamily": "aluminum"
+    },
+    {
+      "id": "D12",
+      "company": "스틸순환",
+      "title": "철강 스크랩",
+      "description": "자석 선별 가능한 탄소강 절삭 조각과 철판 자투리 수요. 비철 혼입분은 제외.",
+      "materialFamily": "steel"
+    },
+    {
+      "id": "D13",
+      "company": "글라스폼텍",
+      "title": "발포 유리 시험 원료",
+      "description": "세척되고 재질 계열이 확인된 내열 유리 파쇄물을 단열용 발포 소재 시험에 사용.",
+      "materialFamily": "glass"
+    },
+    {
+      "id": "D14",
+      "company": "병유리리사이클",
+      "title": "소다석회 유리 컬릿",
+      "description": "색상별 선별된 음료병 파쇄 유리 수요. 붕규산 및 세라믹 혼입은 허용하지 않음.",
+      "materialFamily": "bottle-glass"
+    },
+    {
+      "id": "D15",
+      "company": "시멘트서큘러랩",
+      "title": "칼슘계 보조 원료 연구",
+      "description": "건조된 무기성 침전물 중 칼슘 함량이 높은 재료를 소성 시험용 보조 원료로 검토. 유해성 분석 필수.",
+      "materialFamily": "calcium-sludge"
+    },
+    {
+      "id": "D16",
+      "company": "토양개량연구소",
+      "title": "농업용 석회질 원료",
+      "description": "농업 기준을 만족하는 청정 석회질 분말 수요. 산업 폐수 슬러지는 법적·유해성 확인 전 사용 불가.",
+      "materialFamily": "agri-lime"
+    },
+    {
+      "id": "D17",
+      "company": "폴리에스터루프",
+      "title": "재생 PET 펠릿 원료",
+      "description": "접착제와 타재질 혼입이 적은 투명 폴리에스터 필름을 세척·분쇄해 재생 수지로 생산.",
+      "materialFamily": "pet"
+    },
+    {
+      "id": "D18",
+      "company": "PE필름뱅크",
+      "title": "폴리에틸렌 포장 필름",
+      "description": "LDPE 또는 HDPE 단일재질 포장 비닐 수요. PET 계열은 혼합 불가.",
+      "materialFamily": "pe"
+    },
+    {
+      "id": "D19",
+      "company": "드라이에너지솔루션",
+      "title": "원료 사전건조용 회수열",
+      "description": "건조 공정 급기에 공급할 따뜻한 배기열을 찾고 있음. 분진 제거와 열교환기 설치 가능성 검토.",
+      "materialFamily": "air-heat"
+    },
+    {
+      "id": "D20",
+      "company": "스팀네트워크",
+      "title": "고압 증기 수요",
+      "description": "연속 생산 공정에 사용할 고압 포화증기 필요. 저온 배기 공기는 사용 불가.",
+      "materialFamily": "steam"
+    },
+    {
+      "id": "D21",
+      "company": "리오일제주",
+      "title": "재생 기유 원료",
+      "description": "수분과 금속분을 분석한 사용후 산업 윤활유를 정제하여 재생 베이스오일 원료로 사용.",
+      "materialFamily": "used-oil"
+    },
+    {
+      "id": "D22",
+      "company": "바이오연료랩",
+      "title": "폐식용유 바이오디젤 원료",
+      "description": "음식점에서 회수한 식물성 튀김유 수요. 광유계 윤활유는 수입하지 않음.",
+      "materialFamily": "cooking-oil"
+    },
+    {
+      "id": "D23",
+      "company": "코퍼리커버리",
+      "title": "재생 동 원료",
+      "description": "폐전선 피복을 분리한 구리 도체와 동 케이블을 제련·재생 원료로 매입.",
+      "materialFamily": "copper"
+    },
+    {
+      "id": "D24",
+      "company": "전자기판리사이클",
+      "title": "폐PCB 회수",
+      "description": "금·은·동 회수를 위한 인쇄회로기판 수요. 단순 구리선과 케이블은 별도 분류 필요.",
+      "materialFamily": "pcb"
+    }
+  ]
+}
