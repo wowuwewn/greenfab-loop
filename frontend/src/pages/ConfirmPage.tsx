@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,6 +27,7 @@ interface ConfirmPageProps {
   onSelect: (status: ConfirmedStatus) => void
   onReset: () => void
   onBackToDetect: () => void
+  onGoToPassport: () => void
 }
 
 const formatNumber = new Intl.NumberFormat('ko-KR')
@@ -37,12 +37,11 @@ export function ConfirmPage({
   onSelect,
   onReset,
   onBackToDetect,
+  onGoToPassport,
 }: ConfirmPageProps) {
-  const [showPassportNotice, setShowPassportNotice] = useState(false)
   const { status } = resourceConfirmation
 
   const resetSelection = () => {
-    setShowPassportNotice(false)
     onReset()
   }
 
@@ -199,7 +198,7 @@ export function ConfirmPage({
                 <button
                   className="primary-button confirmation-result__primary"
                   type="button"
-                  onClick={() => setShowPassportNotice(true)}
+                  onClick={onGoToPassport}
                 >
                   자원 정보 작성으로 이동
                   <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
@@ -209,16 +208,6 @@ export function ConfirmPage({
                   다시 선택
                 </button>
               </div>
-            </div>
-          )}
-
-          {status === 'CONFIRMED' && (
-            <div
-              className={`inline-notice confirm-inline-notice${showPassportNotice ? ' is-visible' : ''}`}
-              aria-live="polite"
-            >
-              <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
-              <span>자원 정보 화면은 다음 단계에서 연결됩니다.</span>
             </div>
           )}
 
