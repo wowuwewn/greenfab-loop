@@ -1,0 +1,30 @@
+{
+  
+    "passport_id": "P001",
+  "source_case_id": "SECOM-0116",
+
+  "resource_description": "연마 공정에서 발생한 실리카 포함 부산물",
+
+  "quantity": {
+    "value": 12,
+    "unit": "kg"
+  },
+
+  "condition": "공정 부산물",
+
+  "location": {
+    "region": "경기도",
+    "city": "화성시"
+  },
+
+  "composition_or_spec": "실리카 포함",
+
+  "missing_information": [
+    "상세 성분비"
+  ],
+
+  "status": "AVAILABLE",
+
+  "source_badge": "DEMO"
+  
+}

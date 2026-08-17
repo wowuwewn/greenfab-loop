@@ -49,6 +49,9 @@ def generate_db2(docs:json):
                 f"허용 조건: {', '.join(doc['accepted_conditions'])}"
             ),
             metadata={
+                "product_name": doc['product_name'],
+                "use_case": doc['use_case'],
+                "accepted_conditions": doc['accepted_conditions'],
                 "demand_id": doc['demand_id'],
                 "company_name": doc['company_name'],
                 "quantity_min": doc['quantity']['min'],
@@ -131,13 +134,58 @@ def generate_answer_v3(query, vector_db: Chroma):
     )
     return response.candidates[0].content.parts[0].text, max(scores), docs[0].metadata
 
+def similarity_search(db:Chroma, query, k):
+    results = db._similarity_search_with_relevance_scores(query, k)
+    
+    docs  = [doc for doc, _ in results]
+    scores = [round(score,3) for _, score in results]
+    
+    return docs, scores
+
+def rule_check(docs, passport:json):
+    total_report = []
+    for doc in docs:
+        report = []
+        meta = doc.metadata
+        report.append(meta['demand_id'])
+        
+        quantity_report = f"Passport: {passport['quantity']['value']} Demand: {meta['quantity_min']} ~ {meta['quantity_max']}"
+        report.append(quantity_report)
+        
+        if passport['quantity']['value'] >= meta['quantity_min'] and passport['quantity']['value'] <= meta['quantity_max']:
+            report.append("Pass")
+        else:
+            report.append("Fail")
+        
+        condition_report = f"Passport condition: {passport['condition']}"
+        report.append(condition_report)
+        
+        if any(condition in passport['condition'] for condition in meta['accepted_conditions']):
+            report.append('Pass')
+        else:
+            report.append('Fail')
+            
+        description = " ".join(report)
+        total_report.append(description)
+    
+    return total_report  
+
 if __name__ == '__main__':
     load_dotenv()
-    query = "연마 공정에서 발생한 실리카가 포함된 공정 부산물"
+    #query = "연마 공정에서 발생한 실리카가 포함된 공정 부산물"
     data_db = generate_db2(data)
     
-    answer, similarity, meta = generate_answer_v3(query, data_db)
+    with open('./data/passport.json', 'r', encoding='utf-8') as f:
+        passport = json.load(f)
+   
+    query = passport['resource_description']    
     
-    print(answer)
-    print(f"RAG 유사도: {similarity:.3f}")
-    print(meta)
+    docs, scores = similarity_search(data_db, query, 1)
+    
+    report = rule_check(docs, passport)
+    print(report)
+    #print([(doc.page_content, doc.metadata, score) for doc,score in zip(docs,scores)])
+    #print(type(docs))
+    
+    
+   
