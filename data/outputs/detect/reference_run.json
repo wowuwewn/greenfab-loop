@@ -1,0 +1,37 @@
+{
+  "pipeline_version": "1.0.0",
+  "input": {
+    "file_name": "secom_preprocessed.xlsx",
+    "sha256": "196cea8a01998f0d951e1d76a94f5561b778833ac907d186bc8a90078aa1f377",
+    "sheet": "SECOM_Data",
+    "rows": 1567,
+    "features": 446,
+    "normal_rows": 1463,
+    "defect_rows": 104
+  },
+  "reference_environment": {
+    "python": "3.14.6",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5",
+    "openpyxl": "3.1.5",
+    "scikit_learn": "1.9.0",
+    "xgboost": "3.4.0",
+    "lightgbm": "4.7.0",
+    "shap": "0.52.0",
+    "joblib": "1.5.3"
+  },
+  "reference_result": {
+    "selected_model": "LightGBM",
+    "pooled_oof_recall": 0.47115384615384615,
+    "pooled_oof_precision": 0.16666666666666666,
+    "pooled_oof_f1": 0.24623115577889448,
+    "pooled_oof_balanced_accuracy": 0.6518448656606551,
+    "outer_fold_mean_pr_auc": 0.18836205557840188,
+    "legacy_dashboard_data_sha256_without_terminal_newline": "2d9f8dd5963d2804080ffbd83153ae604cd4430842721524e2e79fe2ece3813c"
+  },
+  "notices": [
+    "raw model score is not a calibrated defect probability",
+    "SHAP is predictive contribution, not physical cause or causal effect",
+    "SECOM detects production risk only; it does not confirm resource generation"
+  ]
+}

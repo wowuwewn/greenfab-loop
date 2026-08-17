@@ -1,0 +1,1763 @@
+{
+  "metadata": {
+    "dataset": "UCI SECOM — team preprocessed Excel",
+    "input_shape": [
+      1567,
+      446
+    ],
+    "input_sheet": "SECOM_Data",
+    "target_column": "result",
+    "validation": "stratified 5-fold CV with inner 3-fold threshold tuning",
+    "preprocessing_scope": "global_preprocessed_input",
+    "strict_cv_preprocessing_from_raw": false,
+    "evaluation_threshold_policy": "fold_specific_inner_oof_threshold",
+    "deployment_threshold_policy": "provisional median of fold-specific thresholds; stored full model requires external calibration before deployment",
+    "score_type": "within-fold relative risk percentile for ranking; raw model score is not a calibrated defect probability",
+    "model_selection_rule": "평균 outer precision이 0.15 이상인 모델 중 평균 recall 최대; PR-AUC와 precision을 순서대로 동률 기준으로 사용",
+    "threshold_rule": "각 fold 학습 데이터 내부 OOF에서 precision >= 0.15인 임계값 중 recall 최대; 없으면 F2 최대",
+    "risk_grade_rule": {
+      "고위험": "OOF 상대 위험 백분위 >= 80%",
+      "중위험": "50% <= OOF 상대 위험 백분위 < 80%",
+      "저위험": "OOF 상대 위험 백분위 < 50%",
+      "notice": "데모용 운영 등급이며 공정 비용 기반 검증 전 확정 기준이 아님"
+    },
+    "limitations": [
+      "전체 데이터 중앙값으로 이미 대체된 입력이므로 원자료부터 완전한 누수 방지 검증은 아님.",
+      "4개 알고리즘을 같은 CV 결과로 선택하고 그 성능을 보고하므로 완전 nested model-selection 추정치는 아님.",
+      "Excel에 timestamp가 없어 시간순 검증은 행 순서 보존을 가정한 강건성 점검임.",
+      "익명 센서 SHAP은 모델 연관 설명이며 물리적 공정 원인이나 인과효과가 아님.",
+      "상관 센서 사이에서 SHAP 중요도가 분산될 수 있음.",
+      "class-weight 모델 score는 보정된 실제 불량확률이 아님.",
+      "fold별 모델 점수 척도 차이를 줄이기 위해 전체 위험 순위와 Top 20%는 fold 내부 백분위로 비교함."
+    ]
+  },
+  "summary": {
+    "총생산건수": 1567,
+    "불량건수": 104,
+    "불량률": 0.06636885768985322,
+    "선정모델명": "LightGBM",
+    "선정임계값": 0.05129851052978842,
+    "임계값용도": "임시 배포 참고값; OOF 혼동행렬은 fold별 임계값 사용",
+    "고위험건수": 315
+  },
+  "selected_model_metrics": {
+    "source": "pooled OOF classification metrics; PR-AUC is the outer-fold mean shown in model_comparison",
+    "recall": 0.47115384615384615,
+    "recall_std": 0.11106575037800574,
+    "precision": 0.16666666666666666,
+    "precision_std": 0.013599609900393562,
+    "f1": 0.24623115577889448,
+    "f1_std": 0.02590783212250265,
+    "pr_auc": 0.18836205557840188,
+    "pr_auc_std": 0.03493617588456021,
+    "balanced_accuracy": 0.6518448656606551,
+    "balanced_accuracy_std": 0.03947536079709831
+  },
+  "cv_fold_mean_metrics": {
+    "recall": 0.4714285714285714,
+    "recall_std": 0.11106575037800574,
+    "precision": 0.1668355510278184,
+    "precision_std": 0.013599609900393562,
+    "f1": 0.2434150958880587,
+    "f1_std": 0.02590783212250265,
+    "pr_auc": 0.18836205557840188,
+    "pr_auc_std": 0.03493617588456021,
+    "balanced_accuracy": 0.6519691363384383,
+    "balanced_accuracy_std": 0.03947536079709831
+  },
+  "pooled_oof_metrics": {
+    "recall": 0.47115384615384615,
+    "precision": 0.16666666666666666,
+    "f1": 0.24623115577889448,
+    "f2": 0.34507042253521125,
+    "pr_auc": 0.16311759321871985,
+    "balanced_accuracy": 0.6518448656606551,
+    "tp": 49,
+    "fp": 245,
+    "fn": 55,
+    "tn": 1218,
+    "pr_auc_raw_fold_scores": 0.1637069308863912
+  },
+  "model_comparison": [
+    {
+      "model_code": "lr",
+      "model": "Logistic Regression",
+      "recall": 0.26999999999999996,
+      "recall_std": 0.07462073417123398,
+      "precision": 0.1355629640138081,
+      "precision_std": 0.027102855810768333,
+      "f1": 0.17727532179011402,
+      "f1_std": 0.03504010283023249,
+      "f2": 0.22138568940080697,
+      "f2_std": 0.05030385562694614,
+      "pr_auc": 0.1515586612962386,
+      "pr_auc_std": 0.020653905939153595,
+      "balanced_accuracy": 0.5727834400860254,
+      "balanced_accuracy_std": 0.028154866288768086,
+      "threshold_median": 0.6341436638385696,
+      "features_used_min": 440,
+      "features_used_max": 440
+    },
+    {
+      "model_code": "rf",
+      "model": "Random Forest",
+      "recall": 0.5485714285714286,
+      "recall_std": 0.04368512358544653,
+      "precision": 0.148321176486992,
+      "precision_std": 0.017458076535629186,
+      "f1": 0.23228206776461047,
+      "f1_std": 0.020815568309258865,
+      "f2": 0.3533835480747851,
+      "f2_std": 0.019683146355387017,
+      "pr_auc": 0.18324233017157135,
+      "pr_auc_std": 0.022675649999888386,
+      "balanced_accuracy": 0.6598121531094087,
+      "balanced_accuracy_std": 0.014338985821217088,
+      "threshold_median": 0.11106438469309111,
+      "features_used_min": 440,
+      "features_used_max": 440
+    },
+    {
+      "model_code": "xgb",
+      "model": "XGBoost",
+      "recall": 0.5971428571428572,
+      "recall_std": 0.05142857142857142,
+      "precision": 0.1259179179179179,
+      "precision_std": 0.01368506011897827,
+      "f1": 0.20756130286825475,
+      "f1_std": 0.01934864778322587,
+      "f2": 0.34037619255010554,
+      "f2_std": 0.02631274424546058,
+      "pr_auc": 0.2170396006339983,
+      "pr_auc_std": 0.012906140136075718,
+      "balanced_accuracy": 0.6498886944557617,
+      "balanced_accuracy_std": 0.027920209742392954,
+      "threshold_median": 0.07867671549320221,
+      "features_used_min": 440,
+      "features_used_max": 440
+    },
+    {
+      "model_code": "lgbm",
+      "model": "LightGBM",
+      "recall": 0.4714285714285714,
+      "recall_std": 0.11106575037800574,
+      "precision": 0.1668355510278184,
+      "precision_std": 0.013599609900393562,
+      "f1": 0.2434150958880587,
+      "f1_std": 0.02590783212250265,
+      "f2": 0.34058145082029545,
+      "f2_std": 0.0564052785318051,
+      "pr_auc": 0.18836205557840188,
+      "pr_auc_std": 0.03493617588456021,
+      "balanced_accuracy": 0.6519691363384383,
+      "balanced_accuracy_std": 0.03947536079709831,
+      "threshold_median": 0.05129851052978842,
+      "features_used_min": 440,
+      "features_used_max": 440
+    }
+  ],
+  "confusion_matrix": {
+    "tp": 49,
+    "fp": 245,
+    "fn": 55,
+    "tn": 1218
+  },
+  "confusion_matrix_policy": "pooled OOF predicted classes; each row uses its outer fold's inner-OOF-selected threshold",
+  "fold_thresholds": [
+    {
+      "fold": 1,
+      "threshold": 0.07180837300497404,
+      "inner_precision": 0.15789473684210525,
+      "inner_recall": 0.3253012048192771
+    },
+    {
+      "fold": 2,
+      "threshold": 0.0753083086993278,
+      "inner_precision": 0.1676300578034682,
+      "inner_recall": 0.3493975903614458
+    },
+    {
+      "fold": 3,
+      "threshold": 0.047944880901336404,
+      "inner_precision": 0.15079365079365079,
+      "inner_recall": 0.4523809523809524
+    },
+    {
+      "fold": 4,
+      "threshold": 0.05129851052978842,
+      "inner_precision": 0.16317991631799164,
+      "inner_recall": 0.46987951807228917
+    },
+    {
+      "fold": 5,
+      "threshold": 0.04736990771525978,
+      "inner_precision": 0.15476190476190477,
+      "inner_recall": 0.46987951807228917
+    }
+  ],
+  "provisional_deployment": {
+    "binary_threshold": 0.05129851052978842,
+    "full_model_grade_raw_score_cutoffs": {
+      "high_raw_score": 0.03535378655343559,
+      "medium_raw_score": 0.011890338874228124
+    },
+    "notice": "외부 검증/확률 보정 전 임시 기준"
+  },
+  "inspection_strategies": [
+    {
+      "fraction": 0.1,
+      "inspection_count": 157,
+      "captured_defects": 27,
+      "total_defects": 104,
+      "capture_rate": 0.25961538461538464
+    },
+    {
+      "fraction": 0.2,
+      "inspection_count": 314,
+      "captured_defects": 56,
+      "total_defects": 104,
+      "capture_rate": 0.5384615384615384
+    },
+    {
+      "fraction": 0.3,
+      "inspection_count": 471,
+      "captured_defects": 65,
+      "total_defects": 104,
+      "capture_rate": 0.625
+    }
+  ],
+  "top20_capture_rate": 0.5384615384615384,
+  "top_features": [
+    {
+      "feature": "Sensor59",
+      "display_feature": "Sensor 59",
+      "shap_value": 0.29524843784106325
+    },
+    {
+      "feature": "Sensor33",
+      "display_feature": "Sensor 33",
+      "shap_value": 0.259734246207113
+    },
+    {
+      "feature": "Sensor130",
+      "display_feature": "Sensor 130",
+      "shap_value": 0.19975083126532825
+    },
+    {
+      "feature": "Sensor19",
+      "display_feature": "Sensor 19",
+      "shap_value": 0.14565750418208553
+    },
+    {
+      "feature": "Sensor21",
+      "display_feature": "Sensor 21",
+      "shap_value": 0.13241010531653655
+    },
+    {
+      "feature": "Sensor31",
+      "display_feature": "Sensor 31",
+      "shap_value": 0.130715635146958
+    },
+    {
+      "feature": "Sensor460",
+      "display_feature": "Sensor 460",
+      "shap_value": 0.1257608838913277
+    },
+    {
+      "feature": "Sensor247",
+      "display_feature": "Sensor 247",
+      "shap_value": 0.1049606405018284
+    },
+    {
+      "feature": "Sensor129",
+      "display_feature": "Sensor 129",
+      "shap_value": 0.09626669863314005
+    },
+    {
+      "feature": "Sensor90",
+      "display_feature": "Sensor 90",
+      "shap_value": 0.09405113381944576
+    },
+    {
+      "feature": "Sensor519",
+      "display_feature": "Sensor 519",
+      "shap_value": 0.08914293064271044
+    },
+    {
+      "feature": "Sensor102",
+      "display_feature": "Sensor 102",
+      "shap_value": 0.08765773974765051
+    },
+    {
+      "feature": "Sensor103",
+      "display_feature": "Sensor 103",
+      "shap_value": 0.08585489726502378
+    },
+    {
+      "feature": "Sensor117",
+      "display_feature": "Sensor 117",
+      "shap_value": 0.07940529699450702
+    },
+    {
+      "feature": "Sensor91",
+      "display_feature": "Sensor 91",
+      "shap_value": 0.0723724951522636
+    }
+  ],
+  "risk_items": [
+    {
+      "id": "SECOM-0045",
+      "row_index": 44,
+      "risk_score": 1.0,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.7572970552449673,
+      "risk_rank": 1,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5576661879960952,
+          "direction": "위험 증가",
+          "feature_value": 8.3045
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2788234900887026,
+          "direction": "위험 증가",
+          "feature_value": 9.1585
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": -0.2783177283912231,
+          "direction": "위험 감소",
+          "feature_value": 12.5641
+        },
+        {
+          "feature": "Sensor336",
+          "display_feature": "Sensor 336",
+          "contribution": 0.20823008463258358,
+          "direction": "위험 증가",
+          "feature_value": 10.1956
+        },
+        {
+          "feature": "Sensor117",
+          "display_feature": "Sensor 117",
+          "contribution": 0.2004306307551352,
+          "direction": "위험 증가",
+          "feature_value": 57.6728
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0048",
+      "row_index": 47,
+      "risk_score": 1.0,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.6497477934198506,
+      "risk_rank": 2,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5358894803806339,
+          "direction": "위험 증가",
+          "feature_value": 23.1373
+        },
+        {
+          "feature": "Sensor407",
+          "display_feature": "Sensor 407",
+          "contribution": -0.4269880515760604,
+          "direction": "위험 감소",
+          "feature_value": 0.7601
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2528857576587793,
+          "direction": "위험 증가",
+          "feature_value": 9.2007
+        },
+        {
+          "feature": "Sensor205",
+          "display_feature": "Sensor 205",
+          "contribution": 0.2397931019415502,
+          "direction": "위험 증가",
+          "feature_value": 13.94
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.23178848592981993,
+          "direction": "위험 증가",
+          "feature_value": 9.4939
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0062",
+      "row_index": 61,
+      "risk_score": 1.0,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5763944376233383,
+      "risk_rank": 3,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.6256057527058606,
+          "direction": "위험 증가",
+          "feature_value": 13.8118
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": 0.2952829759827655,
+          "direction": "위험 증가",
+          "feature_value": 28.6321
+        },
+        {
+          "feature": "Sensor416",
+          "display_feature": "Sensor 416",
+          "contribution": -0.28844947588927505,
+          "direction": "위험 감소",
+          "feature_value": 5.9924
+        },
+        {
+          "feature": "Sensor31",
+          "display_feature": "Sensor 31",
+          "contribution": 0.22855901367257,
+          "direction": "위험 증가",
+          "feature_value": 3.4612
+        },
+        {
+          "feature": "Sensor90",
+          "display_feature": "Sensor 90",
+          "contribution": 0.22833494342857102,
+          "direction": "위험 증가",
+          "feature_value": 8723.97
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0116",
+      "row_index": 115,
+      "risk_score": 1.0,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5720124049389324,
+      "risk_rank": 4,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 1.0598370403631927,
+          "direction": "위험 증가",
+          "feature_value": 18.5764
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.32137874424728663,
+          "direction": "위험 증가",
+          "feature_value": 13.5349
+        },
+        {
+          "feature": "Sensor341",
+          "display_feature": "Sensor 341",
+          "contribution": 0.31629686899686277,
+          "direction": "위험 증가",
+          "feature_value": 5.858
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.22439043233102804,
+          "direction": "위험 증가",
+          "feature_value": 9.2405
+        },
+        {
+          "feature": "Sensor488",
+          "display_feature": "Sensor 488",
+          "contribution": 0.1946125841050968,
+          "direction": "위험 증가",
+          "feature_value": 0.0
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0160",
+      "row_index": 159,
+      "risk_score": 1.0,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.6755648881774186,
+      "risk_rank": 5,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": -0.3721101814601961,
+          "direction": "위험 감소",
+          "feature_value": -1.5664
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.2376973728129765,
+          "direction": "위험 증가",
+          "feature_value": 0.8434
+        },
+        {
+          "feature": "Sensor102",
+          "display_feature": "Sensor 102",
+          "contribution": 0.22590513409625615,
+          "direction": "위험 증가",
+          "feature_value": -0.0987
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2237211514422003,
+          "direction": "위험 증가",
+          "feature_value": 9.2436
+        },
+        {
+          "feature": "Sensor91",
+          "display_feature": "Sensor 91",
+          "contribution": 0.21859683163387075,
+          "direction": "위험 증가",
+          "feature_value": 0.0452
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0187",
+      "row_index": 186,
+      "risk_score": 0.9968152866242038,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5832620301525465,
+      "risk_rank": 6,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor103",
+          "display_feature": "Sensor 103",
+          "contribution": 0.4194794493988823,
+          "direction": "위험 증가",
+          "feature_value": -0.0047
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2615386784618619,
+          "direction": "위험 증가",
+          "feature_value": 9.2007
+        },
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.25832810604140377,
+          "direction": "위험 증가",
+          "feature_value": 12.8982
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.24770030323534112,
+          "direction": "위험 증가",
+          "feature_value": 8.285
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": 0.20665293343604918,
+          "direction": "위험 증가",
+          "feature_value": -1480.75
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0603",
+      "row_index": 602,
+      "risk_score": 0.9968152866242038,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5623419886607423,
+      "risk_rank": 7,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.4751300522205267,
+          "direction": "위험 증가",
+          "feature_value": 7.9755
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": -0.26797337872644467,
+          "direction": "위험 감소",
+          "feature_value": 19.6001
+        },
+        {
+          "feature": "Sensor31",
+          "display_feature": "Sensor 31",
+          "contribution": 0.249460370041098,
+          "direction": "위험 증가",
+          "feature_value": 3.3717
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2291457954180095,
+          "direction": "위험 증가",
+          "feature_value": 8.7994
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": 0.2041750779328676,
+          "direction": "위험 증가",
+          "feature_value": -5160.25
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0162",
+      "row_index": 161,
+      "risk_score": 0.9968051118210862,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.7350496306553306,
+      "risk_rank": 8,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.8201040391251799,
+          "direction": "위험 증가",
+          "feature_value": 9.6745
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2795081463835421,
+          "direction": "위험 증가",
+          "feature_value": 9.0998
+        },
+        {
+          "feature": "Sensor117",
+          "display_feature": "Sensor 117",
+          "contribution": -0.25884854712897676,
+          "direction": "위험 감소",
+          "feature_value": 60.6762
+        },
+        {
+          "feature": "Sensor511",
+          "display_feature": "Sensor 511",
+          "contribution": 0.2115659617628263,
+          "direction": "위험 증가",
+          "feature_value": 669.3878
+        },
+        {
+          "feature": "Sensor336",
+          "display_feature": "Sensor 336",
+          "contribution": 0.1981637573103214,
+          "direction": "위험 증가",
+          "feature_value": 10.8745
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0213",
+      "row_index": 212,
+      "risk_score": 0.9968051118210862,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5282225098555308,
+      "risk_rank": 9,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 1.0163406372732267,
+          "direction": "위험 증가",
+          "feature_value": 29.7264
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.30262261934144735,
+          "direction": "위험 증가",
+          "feature_value": 9.7484
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": -0.20218441937618367,
+          "direction": "위험 감소",
+          "feature_value": -5794.25
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.18296346489127902,
+          "direction": "위험 증가",
+          "feature_value": 0.8123
+        },
+        {
+          "feature": "Sensor39",
+          "display_feature": "Sensor 39",
+          "contribution": 0.18130780405314648,
+          "direction": "위험 증가",
+          "feature_value": 118.244
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0242",
+      "row_index": 241,
+      "risk_score": 0.9968051118210862,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.6539104098482276,
+      "risk_rank": 10,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5101944427178657,
+          "direction": "위험 증가",
+          "feature_value": 9.2082
+        },
+        {
+          "feature": "Sensor117",
+          "display_feature": "Sensor 117",
+          "contribution": -0.36558932255874865,
+          "direction": "위험 감소",
+          "feature_value": 59.9297
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.2318528616365617,
+          "direction": "위험 증가",
+          "feature_value": 0.823
+        },
+        {
+          "feature": "Sensor15",
+          "display_feature": "Sensor 15",
+          "contribution": -0.20297696966721177,
+          "direction": "위험 감소",
+          "feature_value": 423.8263
+        },
+        {
+          "feature": "Sensor90",
+          "display_feature": "Sensor 90",
+          "contribution": 0.1954608021325697,
+          "direction": "위험 증가",
+          "feature_value": 8747.37
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0304",
+      "row_index": 303,
+      "risk_score": 0.9936305732484076,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.47022811237560286,
+      "risk_rank": 11,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5141839178266913,
+          "direction": "위험 증가",
+          "feature_value": 20.7209
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2807464431051076,
+          "direction": "위험 증가",
+          "feature_value": 8.6211
+        },
+        {
+          "feature": "Sensor103",
+          "display_feature": "Sensor 103",
+          "contribution": 0.25798029319867155,
+          "direction": "위험 증가",
+          "feature_value": -0.0084
+        },
+        {
+          "feature": "Sensor348",
+          "display_feature": "Sensor 348",
+          "contribution": 0.22734904324629662,
+          "direction": "위험 증가",
+          "feature_value": 0.0462
+        },
+        {
+          "feature": "Sensor217",
+          "display_feature": "Sensor 217",
+          "contribution": -0.21905458223565968,
+          "direction": "위험 감소",
+          "feature_value": 0.0211
+        }
+      ]
+    },
+    {
+      "id": "SECOM-1327",
+      "row_index": 1326,
+      "risk_score": 0.9936305732484076,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5351520663788157,
+      "risk_rank": 12,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.47701032968323476,
+          "direction": "위험 증가",
+          "feature_value": 5.7309
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": 0.24201317605718986,
+          "direction": "위험 증가",
+          "feature_value": 25.2303
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2228259808391623,
+          "direction": "위험 증가",
+          "feature_value": 9.534
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": 0.20729052556496466,
+          "direction": "위험 증가",
+          "feature_value": -5280.25
+        },
+        {
+          "feature": "Sensor102",
+          "display_feature": "Sensor 102",
+          "contribution": -0.20700681016627537,
+          "direction": "위험 감소",
+          "feature_value": 0.1064
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0015",
+      "row_index": 14,
+      "risk_score": 0.9936102236421726,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5769399879117572,
+      "risk_rank": 13,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.8475589311838982,
+          "direction": "위험 증가",
+          "feature_value": 17.6382
+        },
+        {
+          "feature": "Sensor113",
+          "display_feature": "Sensor 113",
+          "contribution": -0.34762045529058655,
+          "direction": "위험 감소",
+          "feature_value": 0.9228
+        },
+        {
+          "feature": "Sensor511",
+          "display_feature": "Sensor 511",
+          "contribution": 0.31275991259730135,
+          "direction": "위험 증가",
+          "feature_value": 728.8889
+        },
+        {
+          "feature": "Sensor117",
+          "display_feature": "Sensor 117",
+          "contribution": 0.292540033153238,
+          "direction": "위험 증가",
+          "feature_value": 56.5635
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.27053916140869994,
+          "direction": "위험 증가",
+          "feature_value": 9.2007
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0035",
+      "row_index": 34,
+      "risk_score": 0.9936102236421726,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.6093328437905241,
+      "risk_rank": 14,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.4846860565422851,
+          "direction": "위험 증가",
+          "feature_value": 17.5473
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.25391760475431335,
+          "direction": "위험 증가",
+          "feature_value": 0.8139
+        },
+        {
+          "feature": "Sensor117",
+          "display_feature": "Sensor 117",
+          "contribution": 0.22578673648196618,
+          "direction": "위험 증가",
+          "feature_value": 56.4963
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": 0.21281436420434385,
+          "direction": "위험 증가",
+          "feature_value": 33.6292
+        },
+        {
+          "feature": "Sensor247",
+          "display_feature": "Sensor 247",
+          "contribution": 0.18863237950610473,
+          "direction": "위험 증가",
+          "feature_value": 0.0974
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0047",
+      "row_index": 46,
+      "risk_score": 0.9936102236421726,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5115491752292887,
+      "risk_rank": 15,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 1.004450812633553,
+          "direction": "위험 증가",
+          "feature_value": 12.0945
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.21816663560797142,
+          "direction": "위험 증가",
+          "feature_value": 8.7487
+        },
+        {
+          "feature": "Sensor348",
+          "display_feature": "Sensor 348",
+          "contribution": -0.1715255701764618,
+          "direction": "위험 감소",
+          "feature_value": 0.0165
+        },
+        {
+          "feature": "Sensor31",
+          "display_feature": "Sensor 31",
+          "contribution": 0.16916450128087088,
+          "direction": "위험 증가",
+          "feature_value": 3.4174
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.15920466952521742,
+          "direction": "위험 증가",
+          "feature_value": 0.7484
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0189",
+      "row_index": 188,
+      "risk_score": 0.9904458598726115,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.45941053449596786,
+      "risk_rank": 16,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.47300061699208423,
+          "direction": "위험 증가",
+          "feature_value": 12.3073
+        },
+        {
+          "feature": "Sensor205",
+          "display_feature": "Sensor 205",
+          "contribution": 0.3517996495526688,
+          "direction": "위험 증가",
+          "feature_value": 20.75
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.31428465502967734,
+          "direction": "위험 증가",
+          "feature_value": 14.3439
+        },
+        {
+          "feature": "Sensor197",
+          "display_feature": "Sensor 197",
+          "contribution": -0.26119591099962625,
+          "direction": "위험 감소",
+          "feature_value": 14.51
+        },
+        {
+          "feature": "Sensor78",
+          "display_feature": "Sensor 78",
+          "contribution": -0.21884713889491667,
+          "direction": "위험 감소",
+          "feature_value": -0.103
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0278",
+      "row_index": 277,
+      "risk_score": 0.9904458598726115,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.40878915058630505,
+      "risk_rank": 17,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5724087499819244,
+          "direction": "위험 증가",
+          "feature_value": 9.8782
+        },
+        {
+          "feature": "Sensor90",
+          "display_feature": "Sensor 90",
+          "contribution": -0.2875438632675996,
+          "direction": "위험 감소",
+          "feature_value": 9038.9
+        },
+        {
+          "feature": "Sensor31",
+          "display_feature": "Sensor 31",
+          "contribution": 0.23505360688688803,
+          "direction": "위험 증가",
+          "feature_value": 3.4076
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.23114328372968793,
+          "direction": "위험 증가",
+          "feature_value": 8.6211
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": 0.21313710924475396,
+          "direction": "위험 증가",
+          "feature_value": 35.565
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0145",
+      "row_index": 144,
+      "risk_score": 0.9904153354632588,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.48043807731581545,
+      "risk_rank": 18,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor15",
+          "display_feature": "Sensor 15",
+          "contribution": -0.633974374734314,
+          "direction": "위험 감소",
+          "feature_value": 399.7357
+        },
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5958516346656885,
+          "direction": "위험 증가",
+          "feature_value": 5.3382
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2668490806233304,
+          "direction": "위험 증가",
+          "feature_value": 9.1784
+        },
+        {
+          "feature": "Sensor587",
+          "display_feature": "Sensor 587",
+          "contribution": 0.22998521932064114,
+          "direction": "위험 증가",
+          "feature_value": 0.0218
+        },
+        {
+          "feature": "Sensor103",
+          "display_feature": "Sensor 103",
+          "contribution": 0.1910768077458951,
+          "direction": "위험 증가",
+          "feature_value": -0.0042
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0244",
+      "row_index": 243,
+      "risk_score": 0.9904153354632588,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5672314803082826,
+      "risk_rank": 19,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5225374742335936,
+          "direction": "위험 증가",
+          "feature_value": 8.5273
+        },
+        {
+          "feature": "Sensor90",
+          "display_feature": "Sensor 90",
+          "contribution": -0.3014220730770595,
+          "direction": "위험 감소",
+          "feature_value": 9262.3499
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.24496656213639617,
+          "direction": "위험 증가",
+          "feature_value": 0.8187
+        },
+        {
+          "feature": "Sensor19",
+          "display_feature": "Sensor 19",
+          "contribution": 0.22731134918157472,
+          "direction": "위험 증가",
+          "feature_value": 12.6571
+        },
+        {
+          "feature": "Sensor333",
+          "display_feature": "Sensor 333",
+          "contribution": 0.21563416733659066,
+          "direction": "위험 증가",
+          "feature_value": 7.1261
+        }
+      ]
+    },
+    {
+      "id": "SECOM-1401",
+      "row_index": 1400,
+      "risk_score": 0.9904153354632588,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.4230014591180722,
+      "risk_rank": 20,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": -0.3546415441655929,
+          "direction": "위험 감소",
+          "feature_value": -2.49
+        },
+        {
+          "feature": "Sensor413",
+          "display_feature": "Sensor 413",
+          "contribution": -0.27138908705208875,
+          "direction": "위험 감소",
+          "feature_value": 7.2979
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.24178377455989578,
+          "direction": "위험 증가",
+          "feature_value": 8.8909
+        },
+        {
+          "feature": "Sensor39",
+          "display_feature": "Sensor 39",
+          "contribution": 0.21673734943391224,
+          "direction": "위험 증가",
+          "feature_value": 118.0814
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": 0.21196545663618566,
+          "direction": "위험 증가",
+          "feature_value": -5247.0
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0432",
+      "row_index": 431,
+      "risk_score": 0.9872611464968153,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.36106994472599824,
+      "risk_rank": 21,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.45449513245334844,
+          "direction": "위험 증가",
+          "feature_value": 15.81
+        },
+        {
+          "feature": "Sensor280",
+          "display_feature": "Sensor 280",
+          "contribution": -0.36290311957403,
+          "direction": "위험 감소",
+          "feature_value": 0.0262
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": 0.2369667315483694,
+          "direction": "위험 증가",
+          "feature_value": 43.942
+        },
+        {
+          "feature": "Sensor519",
+          "display_feature": "Sensor 519",
+          "contribution": -0.2208273071479222,
+          "direction": "위험 감소",
+          "feature_value": 4.0554
+        },
+        {
+          "feature": "Sensor247",
+          "display_feature": "Sensor 247",
+          "contribution": -0.21443922713815233,
+          "direction": "위험 감소",
+          "feature_value": 0.0189
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0535",
+      "row_index": 534,
+      "risk_score": 0.9872611464968153,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.4024835609867586,
+      "risk_rank": 22,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor287",
+          "display_feature": "Sensor 287",
+          "contribution": 0.3038628515947822,
+          "direction": "위험 증가",
+          "feature_value": 0.2279
+        },
+        {
+          "feature": "Sensor90",
+          "display_feature": "Sensor 90",
+          "contribution": -0.2891295738933563,
+          "direction": "위험 감소",
+          "feature_value": 9454.83
+        },
+        {
+          "feature": "Sensor205",
+          "display_feature": "Sensor 205",
+          "contribution": 0.24083332715170214,
+          "direction": "위험 증가",
+          "feature_value": 14.54
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.21875156464126624,
+          "direction": "위험 증가",
+          "feature_value": 8.9546
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.19783189689589786,
+          "direction": "위험 증가",
+          "feature_value": 9.8527
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0268",
+      "row_index": 267,
+      "risk_score": 0.987220447284345,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.5143346783319483,
+      "risk_rank": 23,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5912729318441718,
+          "direction": "위험 증가",
+          "feature_value": 16.8445
+        },
+        {
+          "feature": "Sensor31",
+          "display_feature": "Sensor 31",
+          "contribution": -0.3151299559531906,
+          "direction": "위험 감소",
+          "feature_value": 4.6817
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.22153484230591275,
+          "direction": "위험 증가",
+          "feature_value": 9.2655
+        },
+        {
+          "feature": "Sensor247",
+          "display_feature": "Sensor 247",
+          "contribution": 0.1891632422837829,
+          "direction": "위험 증가",
+          "feature_value": 0.0825
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": 0.18438126966122723,
+          "direction": "위험 증가",
+          "feature_value": 65.2403
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0326",
+      "row_index": 325,
+      "risk_score": 0.987220447284345,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.411785343217767,
+      "risk_rank": 24,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": -0.3902001677678612,
+          "direction": "위험 감소",
+          "feature_value": 0.1427
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2782354980259201,
+          "direction": "위험 증가",
+          "feature_value": 8.9546
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.2698293299870511,
+          "direction": "위험 증가",
+          "feature_value": 13.7105
+        },
+        {
+          "feature": "Sensor205",
+          "display_feature": "Sensor 205",
+          "contribution": 0.23732357460095307,
+          "direction": "위험 증가",
+          "feature_value": 20.1
+        },
+        {
+          "feature": "Sensor103",
+          "display_feature": "Sensor 103",
+          "contribution": 0.18763725510794885,
+          "direction": "위험 증가",
+          "feature_value": -0.0062
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0352",
+      "row_index": 351,
+      "risk_score": 0.987220447284345,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.36853059717004893,
+      "risk_rank": 25,
+      "risk_grade": "고위험",
+      "observed_label": "불량",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.5987196695359663,
+          "direction": "위험 증가",
+          "feature_value": 5.0809
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.29783532713426236,
+          "direction": "위험 증가",
+          "feature_value": 9.7484
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.24135034212667336,
+          "direction": "위험 증가",
+          "feature_value": 8.4171
+        },
+        {
+          "feature": "Sensor39",
+          "display_feature": "Sensor 39",
+          "contribution": 0.19139259484308072,
+          "direction": "위험 증가",
+          "feature_value": 118.244
+        },
+        {
+          "feature": "Sensor348",
+          "display_feature": "Sensor 348",
+          "contribution": 0.18893899761739166,
+          "direction": "위험 증가",
+          "feature_value": 0.0499
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0192",
+      "row_index": 191,
+      "risk_score": 0.9840764331210191,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.3154964569224011,
+      "risk_rank": 26,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 0.37696226248707737,
+          "direction": "위험 증가",
+          "feature_value": 8.0636
+        },
+        {
+          "feature": "Sensor103",
+          "display_feature": "Sensor 103",
+          "contribution": 0.2908407541634992,
+          "direction": "위험 증가",
+          "feature_value": -0.0067
+        },
+        {
+          "feature": "Sensor2",
+          "display_feature": "Sensor 2",
+          "contribution": 0.24058913370057175,
+          "direction": "위험 증가",
+          "feature_value": 2171.8111
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.22962360090546996,
+          "direction": "위험 증가",
+          "feature_value": 8.872
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": 0.20702140717766263,
+          "direction": "위험 증가",
+          "feature_value": -4781.5
+        }
+      ]
+    },
+    {
+      "id": "SECOM-1273",
+      "row_index": 1272,
+      "risk_score": 0.9840764331210191,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.3115959055095968,
+      "risk_rank": 27,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor547",
+          "display_feature": "Sensor 547",
+          "contribution": -0.35241088324721387,
+          "direction": "위험 감소",
+          "feature_value": 394.082
+        },
+        {
+          "feature": "Sensor1",
+          "display_feature": "Sensor 1",
+          "contribution": -0.2938321650212008,
+          "direction": "위험 감소",
+          "feature_value": 2579.49
+        },
+        {
+          "feature": "Sensor460",
+          "display_feature": "Sensor 460",
+          "contribution": -0.2777803746898122,
+          "direction": "위험 감소",
+          "feature_value": 17.896
+        },
+        {
+          "feature": "Sensor21",
+          "display_feature": "Sensor 21",
+          "contribution": 0.2530245863833632,
+          "direction": "위험 증가",
+          "feature_value": -5241.5
+        },
+        {
+          "feature": "Sensor416",
+          "display_feature": "Sensor 416",
+          "contribution": -0.24098716552969038,
+          "direction": "위험 감소",
+          "feature_value": 5.1102
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0188",
+      "row_index": 187,
+      "risk_score": 0.9840255591054313,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.4051186133981779,
+      "risk_rank": 28,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": -0.3282177887026978,
+          "direction": "위험 감소",
+          "feature_value": 0.4836
+        },
+        {
+          "feature": "Sensor587",
+          "display_feature": "Sensor 587",
+          "contribution": 0.2677671891835376,
+          "direction": "위험 증가",
+          "feature_value": 0.0221
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.25608692152320056,
+          "direction": "위험 증가",
+          "feature_value": 8.6324
+        },
+        {
+          "feature": "Sensor336",
+          "display_feature": "Sensor 336",
+          "contribution": 0.2176728238246285,
+          "direction": "위험 증가",
+          "feature_value": 10.9432
+        },
+        {
+          "feature": "Sensor348",
+          "display_feature": "Sensor 348",
+          "contribution": 0.21024000483353006,
+          "direction": "위험 증가",
+          "feature_value": 0.0413
+        }
+      ]
+    },
+    {
+      "id": "SECOM-0276",
+      "row_index": 275,
+      "risk_score": 0.9840255591054313,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.3580318969486139,
+      "risk_rank": 29,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor59",
+          "display_feature": "Sensor 59",
+          "contribution": 1.129683029456381,
+          "direction": "위험 증가",
+          "feature_value": 87.0391
+        },
+        {
+          "feature": "Sensor131",
+          "display_feature": "Sensor 131",
+          "contribution": -0.36308739404665397,
+          "direction": "위험 감소",
+          "feature_value": 0.9948
+        },
+        {
+          "feature": "Sensor341",
+          "display_feature": "Sensor 341",
+          "contribution": 0.3125221502286516,
+          "direction": "위험 증가",
+          "feature_value": 63.1255
+        },
+        {
+          "feature": "Sensor477",
+          "display_feature": "Sensor 477",
+          "contribution": 0.25916058655946295,
+          "direction": "위험 증가",
+          "feature_value": 146.4232
+        },
+        {
+          "feature": "Sensor33",
+          "display_feature": "Sensor 33",
+          "contribution": 0.2379912153134642,
+          "direction": "위험 증가",
+          "feature_value": 9.1757
+        }
+      ]
+    },
+    {
+      "id": "SECOM-1281",
+      "row_index": 1280,
+      "risk_score": 0.9840255591054313,
+      "risk_score_type": "within-fold relative risk percentile",
+      "raw_model_score": 0.4630973485327676,
+      "risk_rank": 30,
+      "risk_grade": "고위험",
+      "observed_label": "정상",
+      "top_factors": [
+        {
+          "feature": "Sensor547",
+          "display_feature": "Sensor 547",
+          "contribution": -0.45123184178187037,
+          "direction": "위험 감소",
+          "feature_value": 395.754
+        },
+        {
+          "feature": "Sensor2",
+          "display_feature": "Sensor 2",
+          "contribution": 0.2878730773555017,
+          "direction": "위험 증가",
+          "feature_value": 2164.2667
+        },
+        {
+          "feature": "Sensor91",
+          "display_feature": "Sensor 91",
+          "contribution": 0.2356569953969108,
+          "direction": "위험 증가",
+          "feature_value": 0.0408
+        },
+        {
+          "feature": "Sensor491",
+          "display_feature": "Sensor 491",
+          "contribution": -0.2264791902363866,
+          "direction": "위험 감소",
+          "feature_value": 0.9721
+        },
+        {
+          "feature": "Sensor130",
+          "display_feature": "Sensor 130",
+          "contribution": 0.19224137793408955,
+          "direction": "위험 증가",
+          "feature_value": 0.7182
+        }
+      ]
+    }
+  ],
+  "risk_distribution": {
+    "high": 315,
+    "medium": 472,
+    "low": 780
+  },
+  "temporal_holdout": {
+    "assumption": "Excel에 timestamp가 없어 원본 행 순서가 시간순으로 유지됐다고 가정한 마지막 구간 강건성 검증",
+    "train_rows": 1253,
+    "test_rows": 314,
+    "train_defects": 87,
+    "test_defects": 17,
+    "test_fraction": 0.2,
+    "threshold": 0.040666979238894646,
+    "threshold_rule": "max_recall_with_inner_precision_at_least_0.150",
+    "inner_precision": 0.1505016722408027,
+    "inner_recall": 0.5172413793103449,
+    "inner_f2": 0.3477588871715611,
+    "recall": 0.23529411764705882,
+    "precision": 0.08,
+    "f1": 0.11940298507462686,
+    "f2": 0.1694915254237288,
+    "pr_auc": 0.09106261966593127,
+    "balanced_accuracy": 0.540205981382452,
+    "tp": 4,
+    "fp": 46,
+    "fn": 13,
+    "tn": 251,
+    "top20_capture": {
+      "fraction": 0.2,
+      "inspection_count": 63,
+      "captured_defects": 4,
+      "total_defects": 17,
+      "capture_rate": 0.23529411764705882
+    }
+  },
+  "scenario_defaults": {
+    "monthly_production": 10000,
+    "rework_energy_kwh_per_defect": 12.0,
+    "waste_kg_per_defect": 0.8,
+    "unit_cost_krw": 50000,
+    "action_success_rate": 0.6,
+    "emission_factor_tco2eq_per_mwh": 0.4173,
+    "disclaimer": "본 수치는 실제 감축 실적이 아니라 사용자 입력 조건에 따른 시나리오 분석 결과입니다."
+  }
+}
