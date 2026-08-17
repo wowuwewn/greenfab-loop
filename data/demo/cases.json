@@ -1,0 +1,115 @@
+[
+  {
+    "case": {
+      "case_id": "CASE-101",
+      "risk_rank": 2,
+      "shap_top_features": [
+        {
+          "feature_name": "feature_04",
+          "shap_value": 0.35
+        },
+        {
+          "feature_name": "feature_12",
+          "shap_value": 0.21
+        }
+      ],
+      "source_type": "DEMO"
+    },
+    "resource_confirmation": {
+      "status": "CONFIRMED",
+      "confirmed_by": "demo_operator_A",
+      "confirmed_at": "2026-08-16T14:20:00+09:00",
+      "source_type": "DEMO"
+    },
+    "resource_passport": {
+      "passport_id": "PASSPORT-DEMO-101",
+      "description": "고품질 알루미늄 스크랩",
+      "quantity": 500.0,
+      "unit": "kg",
+      "condition": "세척 완료, 이물질 없음",
+      "location": "경남 김해시 A공장",
+      "composition": "알루미늄 99%, 기타 1%",
+      "source_type": "DEMO"
+    },
+    "match": {
+      "model": "BAAI/bge-m3",
+      "created_at": "2026-08-16T14:25:00+09:00",
+      "source_type": "DEMO",
+      "candidates": [
+        {
+          "demand_id": "DEMAND-DEMO-050",
+          "company_name": "에코리사이클링(주)",
+          "demand_description": "순도 95% 이상의 알루미늄 스크랩 월 1톤 필요",
+          "semantic_similarity": 0.92,
+          "rule_check": {
+            "quantity": true,
+            "required_info": true,
+            "location": true,
+            "missing_fields": []
+          },
+          "status": "REVIEW"
+        },
+        {
+          "demand_id": "DEMAND-DEMO-051",
+          "company_name": "새활용팩토리",
+          "demand_description": "알루미늄 및 고철 혼합물",
+          "semantic_similarity": 0.68,
+          "rule_check": {
+            "quantity": false,
+            "required_info": true,
+            "location": false,
+            "missing_fields": ["condition"]
+          },
+          "status": "RULE_FAIL"
+        }
+      ]
+    },
+    "decision": {
+      "status": "APPROVED",
+      "selected_demand_id": "DEMAND-DEMO-050",
+      "reason": "유사도 및 규칙 검사 모두 통과, 단가 협의 완료",
+      "decided_by": "demo_manager",
+      "decided_at": "2026-08-17T09:10:00+09:00"
+    },
+    "esg_scenario": {
+      "source_type": "SCENARIO",
+      "inputs": {
+        "transport_distance_km": 45,
+        "recycling_method": "melt"
+      },
+      "results": {
+        "carbon_saving_kg": 1250.5
+      },
+      "formula_version": "v1.0",
+      "factor_source": "KEITI_2025"
+    },
+    "receipt": {
+      "receipt_id": "REC-DEMO-101",
+      "case_id": "CASE-101",
+      "passport_id": "PASSPORT-DEMO-101",
+      "selected_demand_id": "DEMAND-DEMO-050",
+      "decision_status": "APPROVED",
+      "handoff_status": "HANDOFF_CONFIRMED",
+      "created_at": "2026-08-17T09:15:00+09:00"
+    }
+  },
+  {
+    "case": {
+      "case_id": "CASE-102",
+      "risk_rank": null,
+      "shap_top_features": [],
+      "source_type": "DEMO"
+    },
+    "resource_confirmation": {
+      "status": "PENDING",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "source_type": "DEMO"
+    },
+    "resource_passport": null,
+    "match": null,
+    "decision": null,
+    "esg_scenario": null,
+    "receipt": null
+  }
+]

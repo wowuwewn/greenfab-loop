@@ -43,25 +43,13 @@ def generate_db2(docs:json):
     
     documents = [
         Document(
-            page_content = (
-                f"필요 자원: {doc['product_name']}"
-                f"사용 목적: {doc['use_case']}"
-                f"허용 조건: {', '.join(doc['accepted_conditions'])}"
-            ),
+            page_content = doc['demand_description'],
             metadata={
-                "product_name": doc['product_name'],
-                "use_case": doc['use_case'],
-                "accepted_conditions": doc['accepted_conditions'],
-                "demand_id": doc['demand_id'],
-                "company_name": doc['company_name'],
-                "quantity_min": doc['quantity']['min'],
-                "quantity_max": doc['quantity']['max'],
-                "unit": doc['quantity']['unit'],
-                "required_information": doc['required_information'],
-                "region": doc['location']['region'],
-                "city": doc['location']['city'],
-                "status": doc['status'],
-                "source_badge": doc['source_badge']
+                "demand_id":doc['demand_id'],
+                "company_name":doc['company_name'],
+                "demand_description":doc['demand_description'],
+                "required_quantity":doc['required_quantity'],
+                "location":doc['location']
             }
         ) for doc in docs
     ]
@@ -178,7 +166,11 @@ if __name__ == '__main__':
     with open('../../data/demo/passport.json', 'r', encoding='utf-8') as f:
         passport = json.load(f)
    
-    query = passport['resource_description']    
+    desc = passport.get('description') or ''
+    cond = passport.get('condition') or ''
+    comp = passport.get('composition') or ''
+    
+    query = ", ".join([d for d in [desc, cond, comp] if d])  
     
     docs, scores = similarity_search(data_db, query, 1)
     

@@ -1,30 +1,32 @@
-{
-  
-    "passport_id": "P001",
-  "source_case_id": "SECOM-0116",
-
-  "resource_description": "연마 공정에서 발생한 실리카 포함 부산물",
-
-  "quantity": {
-    "value": 12,
-    "unit": "kg"
+[
+  {
+    "passport_id": "PASSPORT-DEMO-101",
+    "description": "고품질 알루미늄 스크랩",
+    "quantity": 500.0,
+    "unit": "kg",
+    "condition": "세척 완료, 이물질 없음",
+    "location": "경남 김해시 A공장",
+    "composition": "알루미늄 99%, 기타 1%",
+    "source_type": "DEMO"
   },
-
-  "condition": "공정 부산물",
-
-  "location": {
-    "region": "경기도",
-    "city": "화성시"
+  {
+    "passport_id": "PASSPORT-DEMO-102",
+    "description": "사출 공정에서 발생한 폐플라스틱 조각 (PP 재질)",
+    "quantity": null,
+    "unit": null,
+    "condition": "분쇄 완료 상태",
+    "location": "경남 김해시 B공장 야외 적재함",
+    "composition": "폴리프로필렌(PP) 100%",
+    "source_type": "DEMO"
   },
-
-  "composition_or_spec": "실리카 포함",
-
-  "missing_information": [
-    "상세 성분비"
-  ],
-
-  "status": "AVAILABLE",
-
-  "source_badge": "DEMO"
-  
-}
+  {
+    "passport_id": "PASSPORT-DEMO-103",
+    "description": "공정 라인 교체 중 발생한 폐유리 파편",
+    "quantity": 120.5,
+    "unit": "kg",
+    "condition": null,
+    "location": "경남 창원시 C공장",
+    "composition": null,
+    "source_type": "DEMO"
+  }
+]

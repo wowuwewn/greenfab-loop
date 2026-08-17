@@ -1,88 +1,16 @@
 [
-    {
-  "demand_id": "D001",
-  "company_name": "A",
-  "product_name": "실리카 기반 원료",
-  "use_case": "연마재 생산",
-
-  "quantity": {
-    "min": 5,
-    "max": 50,
-    "unit": "kg"
+  {
+    "demand_id": "DEMAND-DEMO-050",
+    "company_name": "에코리사이클링(주)",
+    "demand_description": "순도 95% 이상의 알루미늄 스크랩 월 1톤 필요",
+    "required_quantity": 500,
+    "location": "경남 김해시"
   },
-
-  "accepted_conditions": [
-    "공정 부산물"
-  ],
-
-  "required_information": [
-    "composition"
-  ],
-
-  "location": {
-    "region": "경기도",
-    "city": "화성시"
-  },
-
-  "status": "ACTIVE",
-  "source_badge": "DEMO"
-    },
-
-    {
-  "demand_id": "D002",
-  "company_name": "B",
-  "product_name": "폐골판지 원료",
-  "use_case": "재생지 생산",
-
-  "quantity": {
-    "min": 100,
-    "max": 500,
-    "unit": "kg"
-  },
-
-  "accepted_conditions": [
-    "사용 후 골판지"
-  ],
-
-  "required_information": [
-    "contamination_status"
-  ],
-
-  "location": {
-    "region": "충청북도",
-    "city": "청주시"
-  },
-
-  "status": "ACTIVE",
-  "source_badge": "DEMO"
-    },
-    
-    {
-  "demand_id": "D003",
-  "company_name": "C",
-  "product_name": "중고 목재 팔레트",
-  "use_case": "물류 자재 재사용",
-
-  "quantity": {
-    "min": 20,
-    "max": 100,
-    "unit": "ea"
-  },
-
-  "accepted_conditions": [
-    "사용 가능한 중고품"
-  ],
-
-  "required_information": [
-    "condition"
-  ],
-
-  "location": {
-    "region": "경기도",
-    "city": "평택시"
-  },
-
-  "status": "ACTIVE",
-  "source_badge": "DEMO"
-    }
+  {
+    "demand_id": "DEMAND-DEMO-051",
+    "company_name": "새활용팩토리",
+    "demand_description": "알루미늄 및 고철 혼합물",
+    "required_quantity": 1000,
+    "location": "부산시 강서구"
+  }
 ]
