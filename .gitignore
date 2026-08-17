@@ -1,0 +1,38 @@
+# 환경 변수와 비밀정보
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*secret*.json
+*secrets*.json
+*credential*.json
+*credentials*.json
+
+# Node.js
+node_modules/
+
+# Python 가상환경 및 캐시
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+
+# 빌드 결과물
+build/
+dist/
+out/
+.next/
+
+# OS 및 편집기 임시파일
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+*.swp
+*~
