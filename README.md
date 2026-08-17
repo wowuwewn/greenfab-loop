@@ -68,3 +68,8 @@ Detect
 - REAL / DEMO / SCENARIO를 구분한다.
 - `main` 브랜치는 최종 안정본으로 사용하고, 기능 개발은 별도 브랜치에서 진행할 예정이다.
 - API key, secret, `.env` 파일은 GitHub에 올리지 않는다.
+
+## Figma 디자인
+
+GreenFab Loop의 전체 화면, 디자인 시스템, 반응형 기준과 3분 데모 프로토타입은
+[Figma 디자인 핸드오프](docs/design/greenfab-loop-figma.md)에서 확인할 수 있습니다.
