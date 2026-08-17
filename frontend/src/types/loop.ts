@@ -19,6 +19,17 @@ export interface ResourceConfirmation {
   source_type: SourceType
 }
 
+export interface ResourcePassport {
+  passport_id: string
+  description: string | null
+  quantity: number | null
+  unit: string | null
+  condition: string | null
+  location: string | null
+  composition: string | null
+  source_type: SourceType
+}
+
 export interface DetectAnalysis {
   dataset_name: string
   model_name: string
