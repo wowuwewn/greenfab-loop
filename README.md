@@ -6,7 +6,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ## 핵심 흐름
 
-`Detect` → `Resource Passport` → `Semantic Match` → `Rule / Human Decision` → `ESG Scenario` → `Green Receipt`
+`Detect` → `Resource Confirm` → `Resource Passport` → `Semantic Match` → `Rule Check` → `Human Decision` → `ESG Scenario` → `Green Receipt`
 
 ## 폴더 구성
 
@@ -32,7 +32,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ## 현재 상태
 
-현재는 팀 협업을 위한 초기 프로젝트 구조를 구성한 단계입니다. 애플리케이션, AI 모델, 데이터베이스 등의 실제 기능은 아직 구현하지 않았습니다.
+현재 프런트 Golden Demo 화면, SECOM Detect 재현 파이프라인, FastAPI·PostgreSQL·Alembic 기반 Backend Workflow가 구현되어 있습니다. Backend는 고정 Golden R01 Match snapshot으로 전체 흐름을 재현하며, 실제 BGE-M3·ChromaDB Adapter와 인증·권한은 후속 통합 범위입니다. 실행 방법과 API 순서는 [`backend/README.md`](backend/README.md)를 참고합니다.
 
 ## 팀 작업 가이드
 
@@ -53,6 +53,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ```text
 Detect
+→ Resource Confirm
 → Resource Passport
 → Semantic Match
 → Rule Check
