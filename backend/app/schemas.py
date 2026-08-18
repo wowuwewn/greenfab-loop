@@ -4,7 +4,7 @@ import math
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.enums import (
     DecisionStatus,
@@ -270,6 +270,83 @@ class CaseSummary(ContractModel):
     source_type: SourceType
     workflow_status: WorkflowStatus
     updated_at: datetime
+
+
+class DemandPayload(ContractModel):
+    company_name: str = Field(min_length=1, max_length=255)
+    demand_description: str = Field(min_length=1, max_length=4000)
+    quantity_min: float | None = Field(default=None, ge=0)
+    quantity_max: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=64)
+    location: str | None = Field(default=None, max_length=255)
+    accepted_conditions: list[str] = Field(default_factory=list, max_length=100)
+    required_fields: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("accepted_conditions", "required_fields")
+    @classmethod
+    def normalise_unique_values(cls, values: list[str]) -> list[str]:
+        normalised = [value.strip() for value in values if value.strip()]
+        if len(normalised) != len(set(normalised)):
+            raise ValueError("list values must be unique")
+        return normalised
+
+    @field_validator("required_fields")
+    @classmethod
+    def validate_required_fields(cls, values: list[str]) -> list[str]:
+        allowed = {
+            "description",
+            "quantity",
+            "unit",
+            "condition",
+            "location",
+            "composition",
+        }
+        unknown = sorted(set(values) - allowed)
+        if unknown:
+            raise ValueError(f"unknown Passport fields: {', '.join(unknown)}")
+        return values
+
+    @model_validator(mode="after")
+    def validate_quantity_rule(self) -> DemandPayload:
+        if (
+            self.quantity_min is not None
+            and self.quantity_max is not None
+            and self.quantity_min > self.quantity_max
+        ):
+            raise ValueError("quantity_min cannot exceed quantity_max")
+        if (self.quantity_min is not None or self.quantity_max is not None) and not self.unit:
+            raise ValueError("unit is required when a quantity rule is configured")
+        return self
+
+
+class DemandCreate(DemandPayload):
+    demand_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    source_type: SourceType = SourceType.DEMO
+
+    @field_validator("source_type")
+    @classmethod
+    def disallow_scenario_source(cls, source_type: SourceType) -> SourceType:
+        if source_type is SourceType.SCENARIO:
+            raise ValueError("Demand source_type cannot be SCENARIO")
+        return source_type
+
+
+class DemandUpdate(DemandPayload):
+    pass
+
+
+class DemandOut(DemandPayload):
+    demand_id: str
+    source_type: SourceType
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class DemandIndexSyncOut(ContractModel):
+    provider: str
+    upserted: int
+    deleted: int
 
 
 class HealthOut(ContractModel):

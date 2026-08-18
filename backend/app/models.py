@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    true,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
@@ -306,6 +308,7 @@ class Demand(TimestampMixin, Base):
             name="ck_demands_quantity_unit",
         ),
         CheckConstraint("source_type IN ('REAL', 'DEMO')", name="ck_demands_source_type"),
+        Index("ix_demands_is_active", "is_active"),
     )
 
     demand_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -323,6 +326,12 @@ class Demand(TimestampMixin, Base):
         _enum(SourceType, "source_type"),
         default=SourceType.DEMO,
         server_default=SourceType.DEMO.value,
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=true(),
         nullable=False,
     )
 

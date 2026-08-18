@@ -38,7 +38,7 @@
 3. Golden fixture를 seed하고 `POST /api/v1/demo/reset`으로 초기화합니다.
 4. `GET /health/live`와 `GET /health/ready`가 모두 성공하는지 확인합니다.
 5. 현재 기본 Provider가 Golden R01 전용 고정 DEMO snapshot을 반환하는 `MockMatchProvider`임을 확인합니다.
-6. 실제 BGE Adapter를 별도로 주입한 환경이라면 모델과 ChromaDB 인덱스를 미리 로드하고 발표에서 runtime 실행 여부를 분명히 말합니다.
+6. `MATCH_PROVIDER=bge_chroma` 환경이라면 모델과 ChromaDB 인덱스를 미리 로드하고 발표에서 runtime 실행 여부를 분명히 말합니다.
 7. 브라우저를 새로고침하고 Overview에서 시작합니다.
 
 ## 3. 3분 정상 시연
@@ -75,8 +75,8 @@
 - 기본 Mock은 `model: Xenova/bge-m3`와 snapshot revision을 함께 저장하고 사전 생성된 고정 DEMO 점수를 표시합니다.
 - 이 값은 현재 요청에서 runtime 추론한 결과가 아니라 재현 가능한 고정 snapshot임을 표시합니다.
 - Mock은 Passport 설명에 `반도체`, `세정`, `무기질`이 모두 있는 Golden R01 입력만 지원합니다.
-- signature가 없는 자유 입력은 `503 MATCH_UNAVAILABLE`이며 실제 BGE-M3/ChromaDB Adapter가 필요합니다.
-- 실제 BGE Adapter를 사용할 때만 현재 요청에서 계산한 `semantic_similarity`라고 설명합니다.
+- 기본 Mock에서 signature가 없는 자유 입력은 `503 MATCH_UNAVAILABLE`입니다. 자유 입력은 optional dependency를 설치하고 `MATCH_PROVIDER=bge_chroma`를 명시한 환경에서 실행합니다.
+- `MATCH_PROVIDER=bge_chroma`일 때만 현재 요청에서 계산한 `semantic_similarity`라고 설명합니다.
 - 후보는 Top-3이며 각 후보에 Rule 결과와 `REVIEW`, `NEEDS_INFO`, `RULE_FAIL` 중 하나를 표시합니다.
 - Rule 우선순위는 수량·위치 검사에 명시적인 `false`가 있으면 `RULE_FAIL`, `required_info: false` 또는 필수정보가 부족하면 `NEEDS_INFO`, 그 외는 `REVIEW`입니다.
 - 위치 조건이 설정되지 않아 `location: null`인 후보는 `미평가`로 표시할 수 있으며, `null`만으로 `NEEDS_INFO`가 되지는 않습니다.
@@ -135,7 +135,7 @@ CONFIRMATION_PENDING
 
 ### C. Match Provider 장애
 
-- 실제 BGE Adapter를 주입한 환경의 장애는 `503 MATCH_UNAVAILABLE`입니다.
+- `MATCH_PROVIDER=bge_chroma` 환경의 장애는 `503 MATCH_UNAVAILABLE`입니다.
 - 기본 Mock에 Golden R01 signature가 없는 자유 입력을 보내도 `503 MATCH_UNAVAILABLE`입니다. 고정 R01 점수를 무관한 Passport에 재사용하지 않습니다.
 - Backend가 조용히 Mock 결과로 전환하지 않습니다.
 - 기본 Mock 환경과 실제 BGE 환경을 시연 전에 명확히 선택하고 표시합니다.

@@ -1,6 +1,6 @@
 # GreenFab Loop Backend
 
-FastAPI, PostgreSQL, SQLAlchemy와 Alembic으로 구현한 GreenFab Loop MVP Backend입니다. Data Contract의 전체 Case 흐름을 저장하고, 고정 DEMO Match snapshot을 통해 프런트 E2E 개발과 Golden Demo를 지원합니다.
+FastAPI, PostgreSQL, SQLAlchemy와 Alembic으로 구현한 GreenFab Loop MVP Backend입니다. Data Contract의 전체 Case 흐름을 저장하며, 기본 Golden snapshot과 선택 가능한 실제 BAAI/bge-m3·ChromaDB runtime을 제공합니다.
 
 관련 문서:
 
@@ -92,6 +92,12 @@ alembic revision --autogenerate -m "describe change"
 | `API_KEY_CREDENTIALS` | `[]` | 평문이 아닌 key SHA-256와 actor/role JSON |
 | `EVIDENCE_*` | `.env.example` 참고 | 로컬 Evidence 경로와 최대 upload 크기 |
 | `DETECT_ARTIFACT_MAX_BYTES` | `20971520` | Detect import artifact 최대 크기 |
+| `MATCH_PROVIDER` | `mock` | `mock` 또는 명시적인 `bge_chroma`; 장애 시 자동 fallback 없음 |
+| `BGE_MODEL_NAME`, `BGE_DEVICE` | `BAAI/bge-m3`, `cpu` | embedding 모델과 CPU-first 실행 장치 |
+| `BGE_BATCH_SIZE` | `4` | CPU 메모리를 고려한 보수적인 embedding batch |
+| `CHROMA_MODE` | `persistent` | embedded persistent client 또는 `http` server |
+| `CHROMA_*` | `.env.example` 참고 | collection, 경로 또는 HTTP 연결 설정 |
+| `DEMAND_INDEX_SYNC_ON_STARTUP` | `true` | BGE Provider 시작 시 PostgreSQL Demand 전체 재동기화 |
 | `POSTGRES_*` | `.env.example` 참고 | Compose PostgreSQL 설정 |
 
 `DEMO_RESET_ENABLED`는 보안상 기본 `false`입니다. 공개 배포에서는 활성화하지 않습니다. 로컬 시연에서만 `DEMO_MODE=true`를 유지하고 `.env`를 다음처럼 바꾼 뒤 Backend를 재시작합니다.
@@ -124,6 +130,42 @@ python -m app.cli.import_detect ../data/outputs/detect/dashboard_data.json \
 ```
 
 같은 byte hash의 artifact를 재실행해도 import와 Case Audit를 중복 생성하지 않습니다.
+
+### 실제 BGE-M3·ChromaDB 실행
+
+Core 설치는 대형 ML package나 모델을 받지 않습니다. 실제 Provider를 선택할 때만 optional extra를 설치합니다.
+
+```bash
+python -m pip install -e ".[dev,match]"
+```
+
+embedded persistent Chroma를 사용할 때 `.env`를 다음처럼 설정합니다.
+
+```text
+MATCH_PROVIDER=bge_chroma
+BGE_DEVICE=cpu
+BGE_BATCH_SIZE=4
+CHROMA_MODE=persistent
+CHROMA_PERSIST_DIRECTORY=.data/chroma
+```
+
+별도 Chroma HTTP server를 Compose로 실행하려면 다음 값을 `.env`에 적용하고 `match` profile을 시작합니다.
+
+```text
+INSTALL_MATCH_RUNTIME=true
+MATCH_PROVIDER=bge_chroma
+CHROMA_MODE=http
+CHROMA_HOST=chroma
+CHROMA_PORT=8000
+```
+
+```bash
+docker compose --profile match up --build
+```
+
+BGE 환경에서는 시작 시 모델을 한 번 로드하고 PostgreSQL의 활성 Demand를 Chroma에 upsert합니다. 모델 또는 Chroma 준비가 실패하면 애플리케이션 시작/readiness가 실패하며 Mock으로 전환하지 않습니다.
+BAAI 공식 모델 카드 기준 bge-m3는 약 567M parameters/4.59GB 규모이므로 모델 파일 외에도 추론 메모리 여유가 필요합니다. Core image에는 포함하지 않고 optional extra로만 설치하며 CPU 기본 batch를 4로 제한합니다. 문서 임베딩과 query 임베딩은 L2 normalize하고 Chroma cosine distance `d`는 `1 - d`로 similarity에 변환합니다. 이 점수는 적합도나 성공확률이 아닙니다.
+Compose의 `greenfab_model_cache` volume은 첫 모델 다운로드를 재사용하고 `greenfab_chroma_data`는 embedded index를 보존합니다.
 
 ## 5. Golden Case API 순서
 
@@ -216,18 +258,29 @@ MatchProvider.match(passport, top_k) -> MatchResult
 
 고정 점수는 현재 요청의 runtime 추론값이 아니며 실제 산업 적합성, 안전성 또는 재활용 성공확률이 아닙니다.
 API의 `match.created_at`은 고정 snapshot 생성시각이 아니라 현재 Match Run이 완료된 시각입니다. snapshot ID는 내부 `model_revision`으로 별도 저장합니다.
-Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지 않고 `503 MATCH_UNAVAILABLE`로 거부합니다. 자유 입력 검색에는 실제 BGE-M3/ChromaDB Adapter가 필요합니다.
+Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지 않고 `503 MATCH_UNAVAILABLE`로 거부합니다.
 
-실제 BGE-M3/ChromaDB 연동은 `SemanticSearchAdapter`를 구현해 교체합니다.
+`MATCH_PROVIDER=bge_chroma`는 실제 `BgeM3ChromaAdapter`를 선택합니다.
 
 - BGE-M3는 프로세스 시작 시 한 번 로드
 - CPU 기본, CUDA 명시 선택
-- PostgreSQL Demand를 `demand_id`로 ChromaDB upsert
-- 검색 ID를 PostgreSQL Demand와 조인
+- PostgreSQL 활성 Demand를 `demand_id`로 ChromaDB upsert하고 비활성 ID는 삭제
+- Chroma에는 검색 문서와 ID만 저장하고, 후보·Rule 필드는 매 요청 PostgreSQL에서 다시 조회
 - 동일한 deterministic Rule Service 재사용
+- Passport 또는 검색된 Demand 중 하나라도 `DEMO`이면 Match `source_type`도 `DEMO`
 - 장애 시 Mock으로 조용히 전환하지 않고 `503 MATCH_UNAVAILABLE`
 
-현재 PR에는 실제 BGE/Chroma Adapter와 Provider 선택 환경변수가 포함되지 않습니다.
+Demand 관리 API:
+
+```text
+GET  /api/v1/demands?include_inactive=false
+POST /api/v1/demands
+PUT  /api/v1/demands/{demand_id}
+POST /api/v1/demands/{demand_id}/deactivate
+POST /api/v1/demands/index/sync
+```
+
+Create/update/deactivate는 PostgreSQL을 먼저 source of truth로 갱신한 뒤 선택된 BGE Provider의 Chroma index를 동기화합니다. 외부 index 갱신만 실패하면 API는 `503 DEMAND_INDEX_UNAVAILABLE`로 DB 저장 사실을 숨기지 않으며, 전체 sync endpoint로 재조정할 수 있습니다. 인증이 추가되기 전에는 이 관리 API를 공개 인터넷에 노출하지 않습니다.
 
 ## 7. 검증·무결성·동시성
 
@@ -256,10 +309,10 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 ## 9. 후속 TODO
 
 - SSO/OIDC, 조직·사업장 tenant, DB-backed key rotation/revocation
-- 자유 Passport 입력을 처리하는 실제 BGE-M3/ChromaDB Adapter와 readiness probe
 - MES/QMS 또는 artifact registry에서 Detect artifact를 감지해 CLI를 자동 호출하는 scheduler/connector
 - 범용 idempotency request hash·processing 상태
 - PostgreSQL 기반 동시성·부하 테스트
+- Demand 관리 API 인증·권한과 index sync outbox/재시도 worker
 - 실제 인계 증빙이 필요할 경우 별도 도메인·법적 검토
 - 운영 object storage, malware scan, retention/deletion worker
 - active Rule policy를 MatchRun에 연결하고 실행 version을 결과에 고정

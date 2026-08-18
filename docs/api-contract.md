@@ -60,9 +60,12 @@
 | 409 | `INVALID_CANDIDATE` | 최신 Match에 없는 후보를 선택 |
 | 409 | `CANDIDATE_NOT_REVIEWABLE` | `REVIEW`가 아닌 후보를 승인하려 함 |
 | 409 | `RECEIPT_ALREADY_EXISTS` | 기존 Receipt와 다른 key로 다시 생성하려 함 |
+| 409 | `DEMAND_ALREADY_EXISTS` | 같은 `demand_id`가 이미 존재함 |
+| 409 | `DEMAND_INDEX_NOT_CONFIGURED` | 현재 Provider에는 vector index가 없음 |
 | 422 | `VALIDATION_ERROR` | Pydantic 필드·도메인 검증 실패 |
 | 413 | `EVIDENCE_TOO_LARGE` | Evidence upload 제한 초과 |
 | 503 | `MATCH_UNAVAILABLE` | 주입된 Match Provider 실행 실패 |
+| 503 | `DEMAND_INDEX_UNAVAILABLE` | PostgreSQL 저장 후 Chroma 동기화 실패 |
 | 503 | `DATABASE_UNAVAILABLE` | SQLAlchemy/PostgreSQL 요청 처리 실패 |
 | 500 | `INTEGRITY_ERROR`, `MATCH_DATA_ERROR` | 저장 관계 또는 DEMO Demand가 불완전함 |
 | 500 | `INTERNAL_ERROR` | 처리되지 않은 예외의 안전한 공통 응답 |
@@ -97,7 +100,7 @@ FastAPI 기본 422도 위 형식으로 정규화합니다. API router는 401, 40
 
 ### `GET /health/ready`
 
-PostgreSQL `SELECT 1`과 Evidence storage 접근성을 확인하고 주입된 Provider class를 표시합니다.
+PostgreSQL `SELECT 1`, Evidence storage 접근성, 주입된 Match Provider의 `ready()`를 확인합니다. BGE runtime에서는 모델 로드와 Chroma heartbeat·collection metadata를 검증합니다. 실패하면 `503 MATCH_UNAVAILABLE`이며 Mock으로 대체하지 않습니다.
 
 ```json
 {
@@ -135,7 +138,48 @@ PostgreSQL `SELECT 1`과 Evidence storage 접근성을 확인하고 주입된 Pr
 Response `200`: 전체 Case envelope
 Errors: `404 CASE_NOT_FOUND`
 
-## 6. Resource confirmation API
+## 6. Demand Catalog API
+
+PostgreSQL Demand가 업무·Rule 데이터의 source of truth이며 ChromaDB는 재생성 가능한 검색 index입니다.
+
+### `GET /api/v1/demands?include_inactive=false`
+
+활성 Demand를 ID 순서로 반환합니다. `include_inactive=true`는 비활성 기록도 포함합니다.
+
+### `POST /api/v1/demands`
+
+```json
+{
+  "demand_id": "DEMAND-001",
+  "company_name": "DEMO 세라믹랩",
+  "demand_description": "실리콘계 미분말 5~20kg 수요",
+  "quantity_min": 5,
+  "quantity_max": 20,
+  "unit": "kg",
+  "location": "경상북도",
+  "accepted_conditions": ["건조"],
+  "required_fields": ["description", "quantity", "unit", "composition"],
+  "source_type": "DEMO"
+}
+```
+
+수량 조건이 있으면 단위가 필요하고 `quantity_min <= quantity_max`여야 합니다. Demand 출처는 `REAL` 또는 `DEMO`이며 `SCENARIO`는 거부합니다. Response `201`.
+
+### `PUT /api/v1/demands/{demand_id}`
+
+동일한 business 필드를 전체 교체하고 비활성 Demand라면 다시 활성화합니다. `demand_id`, `source_type`은 변경하지 않습니다.
+
+### `POST /api/v1/demands/{demand_id}/deactivate`
+
+관계형 이력을 삭제하지 않고 `is_active=false`로 바꾸며 BGE Provider에서는 같은 ID를 Chroma에서 제거합니다.
+
+### `POST /api/v1/demands/index/sync`
+
+활성 PostgreSQL Demand 전체를 upsert하고 DB에 없는 Chroma ID를 삭제합니다. Mock Provider에서는 `409 DEMAND_INDEX_NOT_CONFIGURED`입니다.
+
+Create/update/deactivate는 PostgreSQL transaction을 먼저 완료한 뒤 설정된 BGE index를 동기화합니다. Chroma만 실패하면 DB는 source of truth로 남고 `503 DEMAND_INDEX_UNAVAILABLE`가 반환되므로 전체 sync로 재조정할 수 있습니다. 인증이 없는 MVP 관리 API이므로 공개 배포 전에 RBAC가 필요합니다.
+
+## 7. Resource confirmation API
 
 ### `PUT /api/v1/cases/{case_id}/resource-confirmation`
 
@@ -158,7 +202,7 @@ Errors: `404 CASE_NOT_FOUND`
 Response `200`: 최신 Case envelope
 Errors: `404 CASE_NOT_FOUND`, `409 INVALID_STATE`, `422 VALIDATION_ERROR`
 
-## 7. Resource Passport API
+## 8. Resource Passport API
 
 ### `PUT /api/v1/cases/{case_id}/resource-passport`
 
@@ -186,7 +230,7 @@ Headers: Production `X-API-Key`, 명시적 Demo에서만 `X-Actor` 선택
 Response `200`: 최신 Case envelope
 Errors: `404 CASE_NOT_FOUND`, `409 INVALID_STATE`, `422 VALIDATION_ERROR`
 
-## 8. Match API
+## 9. Match API
 
 ### `POST /api/v1/cases/{case_id}/matches`
 
@@ -203,7 +247,10 @@ Headers: `Idempotency-Key`, Production `X-API-Key`, 명시적 Demo에서만 `X-A
 - snapshot 점수는 현재 요청의 runtime 추론값이 아니며 모델명과 snapshot revision을 내부 Match Run에 함께 저장합니다.
 - 응답 `match.created_at`은 snapshot 생성시각이 아니라 현재 Match Run의 `completed_at`입니다.
 - Mock은 Golden R01 snapshot 전용입니다. Passport `description`에 `반도체`, `세정`, `무기질`이 모두 없으면 무관한 고정 점수를 표시하지 않고 `503 MATCH_UNAVAILABLE`를 반환합니다.
-- Golden signature가 없는 자유 입력 검색에는 실제 BGE-M3/ChromaDB Adapter가 필요합니다.
+- `MATCH_PROVIDER=bge_chroma`는 BAAI/bge-m3 dense embedding으로 Chroma Top-k ID를 찾습니다. 후보 회사·설명·Rule은 활성 PostgreSQL Demand에서 다시 읽습니다.
+- Passport 또는 검색된 Demand 중 하나라도 `DEMO` 출처이면 Match Run도 `DEMO`로 저장합니다. 모든 입력이 `REAL`일 때만 `REAL`입니다.
+- document/query embedding은 normalize하며 cosine distance `d`를 `1 - d`로 변환한 값이 `semantic_similarity`입니다.
+- BGE/Chroma 실패 시 Mock snapshot으로 자동 전환하지 않습니다.
 
 Response `200`: 최신 Case envelope
 Errors: `409 INVALID_STATE`, `503 MATCH_UNAVAILABLE`, `500 MATCH_DATA_ERROR`
@@ -241,7 +288,7 @@ Rule status 우선순위:
 
 `null`은 미평가·비적용일 수 있으며 그 자체로 `NEEDS_INFO`가 되지 않습니다.
 
-## 9. Human Decision API
+## 10. Human Decision API
 
 ### `PUT /api/v1/cases/{case_id}/decision`
 
@@ -266,7 +313,7 @@ Rule status 우선순위:
 Response `200`: 최신 Case envelope
 Errors: `409 INVALID_STATE`, `409 INVALID_CANDIDATE`, `409 CANDIDATE_NOT_REVIEWABLE`, `422 VALIDATION_ERROR`
 
-## 10. ESG Scenario API
+## 11. ESG Scenario API
 
 ### `POST /api/v1/cases/{case_id}/esg-scenario`
 
@@ -301,7 +348,7 @@ Request body: 없음
 Response `200`: 최신 Case envelope
 Errors: `409 INVALID_STATE`
 
-## 11. Green Receipt API
+## 12. Green Receipt API
 
 ### `POST /api/v1/cases/{case_id}/receipt`
 
@@ -341,7 +388,7 @@ Errors: `404 CASE_NOT_FOUND`, `404 RECEIPT_NOT_FOUND`
 
 Receipt는 법적 인증서, 실제 물류 인계 확인 또는 불변 감사 원장이 아닙니다.
 
-## 12. Demo API
+## 13. Demo API
 
 ### `POST /api/v1/demo/reset`
 
@@ -363,8 +410,7 @@ Errors: `404 NOT_FOUND`
 
 Passport Evidence upload/list/download와 versioned Rule policy catalog는
 [`backend-productization.md`](./backend-productization.md)에 정의합니다. Evidence는 7-key
-CaseEnvelope를 확장하지 않는 별도 endpoint이며, Rule catalog는 현재 Match 실행에 아직 연결되지
-않습니다.
+CaseEnvelope를 확장하지 않는 별도 endpoint입니다. Rule catalog의 active policy revision은 Match 실행 시 snapshot으로 고정합니다.
 
 ## 14. Contract test 최소 목록
 
@@ -380,11 +426,13 @@ CaseEnvelope를 확장하지 않는 별도 endpoint이며, Rule catalog는 현�
 - Receipt snapshot과 직전 Case 일치
 - Match·Receipt 중복 요청 처리
 - 모든 오류의 `trace_id`
+- Demand create/update/deactivate와 vector index upsert/delete fake integration
+- Provider readiness 실패 시 503이며 Mock fallback이 없는지 확인
 
 ## 15. 후속 TODO
 
 - SSO/OIDC, 조직·사업장 tenant와 DB-backed key lifecycle
 - 정렬 option과 cursor pagination
 - 범용 idempotency request hash·처리 상태 저장
-- 자유 Passport 입력을 처리하는 실제 BGE/Chroma Adapter 설정과 readiness
+- Demand index sync outbox·재시도 worker와 관리 API RBAC
 - OpenAPI example·frontend client 자동 생성

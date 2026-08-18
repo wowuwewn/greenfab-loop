@@ -20,6 +20,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INSTALL_MATCH_RUNTIME: ${INSTALL_MATCH_RUNTIME:-false}
     restart: unless-stopped
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -38,14 +40,43 @@ services:
       EVIDENCE_STORAGE_ROOT: ${EVIDENCE_STORAGE_ROOT:-/app/var/evidence}
       EVIDENCE_MAX_BYTES: ${EVIDENCE_MAX_BYTES:-5242880}
       DETECT_ARTIFACT_MAX_BYTES: ${DETECT_ARTIFACT_MAX_BYTES:-20971520}
-    volumes:
-      - greenfab_evidence_data:/app/var/evidence
+      MATCH_PROVIDER: ${MATCH_PROVIDER:-mock}
+      BGE_MODEL_NAME: ${BGE_MODEL_NAME:-BAAI/bge-m3}
+      BGE_DEVICE: ${BGE_DEVICE:-cpu}
+      BGE_BATCH_SIZE: ${BGE_BATCH_SIZE:-4}
+      CHROMA_MODE: ${CHROMA_MODE:-persistent}
+      CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-greenfab_demands}
+      CHROMA_PERSIST_DIRECTORY: ${CHROMA_PERSIST_DIRECTORY:-/app/.data/chroma}
+      CHROMA_HOST: ${CHROMA_HOST:-chroma}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_SSL: ${CHROMA_SSL:-false}
+      CHROMA_HEADERS: '${CHROMA_HEADERS:-{}}'
+      DEMAND_INDEX_SYNC_ON_STARTUP: ${DEMAND_INDEX_SYNC_ON_STARTUP:-true}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - greenfab_evidence_data:/app/var/evidence
+      - greenfab_chroma_data:/app/.data/chroma
+      - greenfab_model_cache:/app/.cache/huggingface
+
+  chroma:
+    image: chromadb/chroma:0.6.3
+    profiles: ["match"]
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "127.0.0.1:${CHROMA_EXTERNAL_PORT:-8001}:8000"
+    volumes:
+      - greenfab_chroma_server_data:/chroma/chroma
 
 volumes:
   greenfab_postgres_data:
   greenfab_evidence_data:
+  greenfab_chroma_data:
+  greenfab_model_cache:
+  greenfab_chroma_server_data:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
@@ -17,6 +18,10 @@ from app.schemas import (
     CaseEnvelope,
     CaseSummary,
     DecisionRequest,
+    DemandCreate,
+    DemandIndexSyncOut,
+    DemandOut,
+    DemandUpdate,
     ErrorResponse,
     HealthOut,
     MatchRequest,
@@ -35,7 +40,13 @@ from app.services.evidence import (
     list_passport_evidence,
     to_evidence_out,
 )
-from app.services.match import MatchProvider
+from app.services.demand import (
+    create_demand,
+    deactivate_demand,
+    list_demands,
+    update_demand,
+)
+from app.services.match import DemandIndexManager, MatchProvider
 from app.services.rule_catalog import (
     activate_rule_policy_version,
     create_rule_policy_version,
@@ -89,6 +100,7 @@ api_router = APIRouter(
     },
 )
 health_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _trace_id(request: Request) -> str | None:
@@ -101,6 +113,33 @@ def _match_provider(request: Request) -> MatchProvider:
 
 def _evidence_storage(request: Request) -> EvidenceStorage:
     return request.app.state.evidence_storage
+
+
+def _demand_index(request: Request) -> DemandIndexManager | None:
+    provider = _match_provider(request)
+    return provider if isinstance(provider, DemandIndexManager) else None
+
+
+def _sync_demand(request: Request, demand_id: str, *, active: bool) -> None:
+    index = _demand_index(request)
+    if index is None:
+        return
+    try:
+        if active:
+            index.upsert_demand(demand_id)
+        else:
+            index.delete_demand(demand_id)
+    except Exception as exc:
+        logger.error(
+            "Demand index mutation failed demand_id=%s error_type=%s",
+            demand_id,
+            type(exc).__name__,
+        )
+        raise DomainError(
+            "DEMAND_INDEX_UNAVAILABLE",
+            "Demand는 PostgreSQL에 저장됐지만 검색 인덱스를 갱신하지 못했습니다.",
+            503,
+        ) from exc
 
 
 @api_router.get("/cases", response_model=list[CaseSummary])
@@ -129,6 +168,87 @@ def list_cases(
 @api_router.get("/cases/{case_id}", response_model=CaseEnvelope)
 def read_case(case_id: str, db: DbSession, _principal: ViewerPrincipal) -> CaseEnvelope:
     return get_case_envelope(db, case_id)
+
+
+@api_router.get("/demands", response_model=list[DemandOut])
+def read_demands(
+    db: DbSession,
+    _principal: ViewerPrincipal,
+    include_inactive: bool = False,
+) -> list[DemandOut]:
+    records = list_demands(db, include_inactive=include_inactive)
+    return [DemandOut.model_validate(record) for record in records]
+
+
+@api_router.post("/demands", response_model=DemandOut, status_code=201)
+def add_demand(
+    payload: DemandCreate,
+    request: Request,
+    db: DbSession,
+    principal: AdminPrincipal,
+) -> DemandOut:
+    with db.begin():
+        record = create_demand(db, payload)
+        result = DemandOut.model_validate(record)
+    _sync_demand(request, record.demand_id, active=True)
+    return result
+
+
+@api_router.put("/demands/{demand_id}", response_model=DemandOut)
+def replace_demand(
+    demand_id: str,
+    payload: DemandUpdate,
+    request: Request,
+    db: DbSession,
+    principal: AdminPrincipal,
+) -> DemandOut:
+    with db.begin():
+        record = update_demand(db, demand_id, payload)
+        result = DemandOut.model_validate(record)
+    _sync_demand(request, record.demand_id, active=True)
+    return result
+
+
+@api_router.post("/demands/{demand_id}/deactivate", response_model=DemandOut)
+def remove_demand_from_matching(
+    demand_id: str,
+    request: Request,
+    db: DbSession,
+    principal: AdminPrincipal,
+) -> DemandOut:
+    with db.begin():
+        record = deactivate_demand(db, demand_id)
+        result = DemandOut.model_validate(record)
+    _sync_demand(request, record.demand_id, active=False)
+    return result
+
+
+@api_router.post("/demands/index/sync", response_model=DemandIndexSyncOut)
+def reconcile_demand_index(
+    request: Request,
+    _principal: AdminPrincipal,
+) -> DemandIndexSyncOut:
+    index = _demand_index(request)
+    if index is None:
+        raise DomainError(
+            "DEMAND_INDEX_NOT_CONFIGURED",
+            "현재 Match Provider에는 Demand 검색 인덱스가 없습니다.",
+            409,
+        )
+    try:
+        result = index.sync_all_demands()
+    except Exception as exc:
+        logger.error("Demand index reconciliation failed error_type=%s", type(exc).__name__)
+        raise DomainError(
+            "DEMAND_INDEX_UNAVAILABLE",
+            "Demand 검색 인덱스를 동기화하지 못했습니다.",
+            503,
+        ) from exc
+    return DemandIndexSyncOut(
+        provider=index.provider_name,
+        upserted=result.upserted,
+        deleted=result.deleted,
+    )
 
 
 @api_router.put("/cases/{case_id}/resource-confirmation", response_model=CaseEnvelope)
@@ -408,6 +528,14 @@ def readiness(request: Request, db: DbSession) -> HealthOut:
     provider = _match_provider(request)
     storage = _evidence_storage(request)
     storage.check_ready()
+    try:
+        provider.ready()
+    except Exception as exc:
+        raise DomainError(
+            "MATCH_UNAVAILABLE",
+            "설정된 Match Provider를 사용할 수 없습니다.",
+            503,
+        ) from exc
     return HealthOut(
         status="ready",
         database="ok",

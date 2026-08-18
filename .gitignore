@@ -27,6 +27,7 @@ __pycache__/
 htmlcov/
 *.db
 backend/var/
+.data/
 
 # 빌드 결과물
 build/

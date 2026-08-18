@@ -76,6 +76,19 @@ class Settings(BaseSettings):
             raise ValueError("CORS_ORIGINS must contain explicit origins")
         return list(dict.fromkeys(origins))
 
+    match_provider: Literal["mock", "bge_chroma"] = "mock"
+    bge_model_name: str = "BAAI/bge-m3"
+    bge_device: str = "cpu"
+    bge_batch_size: int = Field(default=4, ge=1, le=256)
+    chroma_mode: Literal["persistent", "http"] = "persistent"
+    chroma_collection_name: str = "greenfab_demands"
+    chroma_persist_directory: str = ".data/chroma"
+    chroma_host: str = "localhost"
+    chroma_port: int = Field(default=8001, ge=1, le=65535)
+    chroma_ssl: bool = False
+    chroma_headers: dict[str, str] = Field(default_factory=dict)
+    demand_index_sync_on_startup: bool = True
+
     @model_validator(mode="after")
     def forbid_demo_mutations_in_production(self) -> "Settings":
         environment = self.environment.strip().casefold()

@@ -383,7 +383,7 @@ def run_match(
         model_revision=result.snapshot_id,
         top_k=top_k,
         status=MatchRunStatus.COMPLETED,
-        source_type=SourceType.DEMO,
+        source_type=SourceType(result.source_type),
         idempotency_key=idempotency_key,
         completed_at=completed_at,
     )

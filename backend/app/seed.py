@@ -33,6 +33,7 @@ DEMO_DEMANDS = (
         "location": None,
         "accepted_conditions": [],
         "required_fields": ["description", "quantity", "unit", "composition"],
+        "is_active": True,
     },
     {
         "demand_id": "D15",
@@ -47,6 +48,7 @@ DEMO_DEMANDS = (
         "location": None,
         "accepted_conditions": [],
         "required_fields": ["description", "composition", "condition"],
+        "is_active": True,
     },
     {
         "demand_id": "D11",
@@ -60,6 +62,7 @@ DEMO_DEMANDS = (
         "location": None,
         "accepted_conditions": [],
         "required_fields": ["description", "composition", "condition"],
+        "is_active": True,
     },
 )
 

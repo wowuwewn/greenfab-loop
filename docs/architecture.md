@@ -36,7 +36,7 @@ flowchart LR
     D --> P
 
     M --> MM["MockMatchProvider"]
-    M --> BM["Future BGE/Chroma Adapter\nBAAI/bge-m3"]
+    M --> BM["Optional BGE/Chroma Runtime\nBAAI/bge-m3"]
     BM --> C[("ChromaDB\nDemand vectors")]
     BM --> P
     R --> P
@@ -51,7 +51,7 @@ flowchart LR
 | PostgreSQL | Case, Detect provenance, 확인, Passport/Evidence metadata, Demand, Match, Decision, Scenario, Receipt, Audit, Rule policy 저장 | 벡터 최근접 검색, evidence binary 저장 |
 | Offline Detect | 동일 Fold 모델 비교, LightGBM/OOF/SHAP 결과 생성 | Resource·폐기물·재활용 정보를 추론 |
 | Detect Import | 검증된 Detect 산출물을 hash 기반으로 idempotent Case upsert | 원본 결과에 공정 의미를 임의 부여, 기존 Workflow 초기화 |
-| BGE-M3 / ChromaDB | Passport 텍스트와 DEMO Demand 텍스트의 Top-k 의미 유사도 검색 | 안전성·성공확률·실제 산업 적합성 판단 |
+| BGE-M3 / ChromaDB | Passport 텍스트와 활성 Demand 텍스트의 Top-k 의미 유사도 검색 | 안전성·성공확률·실제 산업 적합성 판단 |
 | Rule Service | 수량, 필수정보, 위치 등 명시적 조건의 결정론적 검사 | LLM 기반 조건 생성, 최종 승인·거절 |
 | Human Decision | 후보 선택과 `APPROVED`, `HOLD`, `REJECTED` 입력 | AI가 대신 수행할 수 없음 |
 | Scenario Service | 사용자 입력값과 명시된 수식으로 후보 전환량 계산 | 검증되지 않은 탄소 감축량이나 실제 전환 실적 생성 |
@@ -79,7 +79,7 @@ Backend는 Match 구현에 직접 의존하지 않고 동일한 인터페이스�
 ```text
 MatchProvider.match(passport, top_k) -> MatchResult
 ├─ MockMatchProvider
-└─ Future BGE/Chroma Adapter
+└─ BgeChromaMatchProvider -> BgeM3ChromaAdapter
 ```
 
 ### `MockMatchProvider`
@@ -89,15 +89,19 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - 저장된 점수는 runtime 추론값이 아니라 사전 생성된 snapshot 값이며 `model`, `model_revision`으로 출처를 구분합니다. 외부 `match.created_at`은 snapshot 생성시각이 아니라 현재 Match Run의 완료 시각입니다.
 - 고정 snapshot을 실제 산업 적합성·안전성·재활용 성공확률로 해석하지 않습니다.
 
-### Future BGE/Chroma Adapter
+### `BgeChromaMatchProvider`
 
-- 현재 PR에는 구현하지 않고 `SemanticSearchAdapter` 경계만 제공합니다.
-- 서버 시작 시 BGE-M3 모델을 한 번 로드합니다.
-- PostgreSQL의 DEMO Demand를 `demand_id` 기준으로 ChromaDB에 upsert합니다.
+- `MATCH_PROVIDER=bge_chroma`로 명시적으로 선택합니다.
+- optional `match` dependency를 설치한 프로세스에서 BGE-M3 모델을 한 번 로드합니다.
+- CPU가 기본이며 `BGE_DEVICE`로 다른 장치를 명시할 수 있습니다.
+- 공식 모델 카드 기준 약 567M parameters/4.59GB 모델이므로 core image에 포함하지 않고 CPU 기본 batch를 4로 제한합니다.
+- PostgreSQL의 활성 Demand를 `demand_id` 기준으로 ChromaDB에 upsert하고 비활성 ID는 삭제합니다.
 - 실제 계산된 `semantic_similarity`와 Top-k 후보를 반환합니다.
-- CPU를 기본 지원하고 GPU는 환경 설정으로 선택합니다.
+- query/document embedding을 normalize하고 cosine distance `d`를 `1 - d` similarity로 변환합니다.
+- Chroma hit의 ID를 PostgreSQL Demand와 다시 조인한 후 deterministic Rule을 실행합니다.
+- embedded persistent client와 별도 HTTP Chroma server를 모두 지원합니다.
 
-현재 애플리케이션은 기본 `MockMatchProvider`를 사용하며 테스트에서는 `create_app(match_provider=...)`로 Provider를 주입할 수 있습니다. 실제 BGE Adapter가 추가되면 환경 설정으로 Provider를 명시적으로 선택해야 합니다. BGE 장애 시 Backend가 조용히 Mock 결과로 대체하면 안 되며 `503 MATCH_UNAVAILABLE`로 알려야 합니다.
+기본은 반복 가능한 `MockMatchProvider`입니다. BGE runtime을 선택한 뒤 모델·Chroma가 실패하면 시작/readiness 또는 Match가 실패하며 Mock으로 조용히 대체하지 않습니다. 테스트에서는 `create_app(match_provider=...)`로 fake Provider를 주입합니다.
 
 ## 6. 데이터 저장 경계
 
@@ -158,7 +162,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 frontend     Vite/React 정적 앱 또는 개발 서버
 backend      FastAPI + SQLAlchemy + Alembic
 postgres     PostgreSQL
-chroma       실제 BGE Provider 추가 후 선택적으로 구성
+chroma       BGE HTTP mode에서 Compose match profile로 선택 구성
 ```
 
 - 설정은 환경변수로 주입하고 `.env`는 Git에 올리지 않습니다.
@@ -183,9 +187,7 @@ chroma       실제 BGE Provider 추가 후 선택적으로 구성
 ## 11. 후속 구현 TODO
 
 - 운영 SSO/OIDC·조직 tenant와 API key rotation/revocation
-- 실제 `BAAI/bge-m3` CPU-first Adapter와 ChromaDB lifecycle
-- Provider 선택 환경변수와 실제 모델 readiness probe
 - Detect import scheduler와 MES/QMS connector
-- active Rule policy version을 Match/Rule 실행 결과에 연결
 - Evidence object storage, malware scan, retention/deletion worker
+- Demand index sync의 transactional outbox·재시도 worker와 운영 관측
 - 실제 인계 증빙이 필요할 경우 별도의 정책·API·법적 검토

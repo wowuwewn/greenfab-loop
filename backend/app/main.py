@@ -11,7 +11,8 @@ from app.config import settings
 from app.database import SessionLocal
 from app.errors import register_exception_handlers
 from app.seed import seed_demo_data
-from app.services.match import MatchProvider, MockMatchProvider
+from app.services.match import DemandIndexManager, MatchProvider
+from app.services.runtime_match import build_match_provider
 from app.storage import EvidenceStorage, LocalEvidenceStorage
 
 
@@ -22,12 +23,18 @@ def create_app(
     seed_on_startup: bool | None = None,
 ) -> FastAPI:
     should_seed = settings.seed_demo_data if seed_on_startup is None else seed_on_startup
+    configured_provider = match_provider or build_match_provider(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if should_seed:
             with SessionLocal.begin() as session:
                 seed_demo_data(session)
+        if settings.demand_index_sync_on_startup and isinstance(
+            configured_provider, DemandIndexManager
+        ):
+            configured_provider.sync_all_demands()
+        configured_provider.ready()
         yield
 
     application = FastAPI(
@@ -36,7 +43,7 @@ def create_app(
         description=("GreenFab Loop의 상태 전이와 Data Contract v0.1을 제공하는 MVP API"),
         lifespan=lifespan,
     )
-    application.state.match_provider = match_provider or MockMatchProvider()
+    application.state.match_provider = configured_provider
     application.state.evidence_storage = evidence_storage or LocalEvidenceStorage(
         settings.evidence_storage_root
     )

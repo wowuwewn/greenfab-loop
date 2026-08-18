@@ -134,11 +134,11 @@ Binary는 DB나 Git에 저장하지 않습니다. 현재 local storage는 개발
 
 ### `demands`
 
-Demand는 Rule과 향후 ChromaDB 인덱싱의 관계형 원본입니다.
+Demand는 Rule과 ChromaDB 인덱싱의 관계형 원본입니다.
 
 | 컬럼 | 타입 | 제약·설명 |
 | --- | --- | --- |
-| `demand_id` | `VARCHAR(64)` | PK, 향후 Chroma document ID |
+| `demand_id` | `VARCHAR(64)` | PK, Chroma document ID와 동일 |
 | `company_name` | `VARCHAR(255)` | 필수 |
 | `demand_description` | `TEXT` | 필수 |
 | `quantity_min`, `quantity_max` | `NUMERIC(18,6)` | null 또는 0 이상, min <= max |
@@ -147,9 +147,10 @@ Demand는 Rule과 향후 ChromaDB 인덱싱의 관계형 원본입니다.
 | `accepted_conditions` | `JSONB` | string array, 기본 `[]` |
 | `required_fields` | `JSONB` | Passport 필드명 array, 기본 `[]` |
 | `source_type` | `VARCHAR` | `REAL`, `DEMO`; Golden fixture는 DEMO |
+| `is_active` | `BOOLEAN` | 기본 true; false이면 검색 index에서 제외 |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | 서버 생성 |
 
-현재 Rule Service는 수량, 단위, 필수 필드와 별도 `accepted_locations` 입력을 평가합니다. `accepted_conditions`는 저장만 하며 아직 자동 판정하지 않습니다. DB `location`을 실제 BGE Adapter의 Rule 입력으로 변환하는 작업은 후속 Adapter 책임입니다.
+Rule Service는 수량, 단위, 필수 필드와 위치를 결정론적으로 평가합니다. BGE Provider가 DB `location`을 Rule의 허용 위치로 변환합니다. `accepted_conditions`는 검색 문서에는 포함하지만 아직 hard Rule로 자동 판정하지 않습니다.
 
 ### `rule_policies`, `rule_policy_versions`
 
@@ -264,6 +265,7 @@ Audit Event는 MVP 내부 추적 기록이며 인증된 외부 감사 로그가 
 현재 migration 인덱스:
 
 - `cases(workflow_status)`
+- `demands(is_active)`
 - `match_runs(case_id, created_at)`
 - `audit_events(case_id, created_at)`
 - `cases(detect_import_id)`
@@ -292,18 +294,21 @@ FK 삭제 정책:
 
 ## 6. ChromaDB 연결 경계
 
-ChromaDB와 실제 BGE Adapter는 현재 migration에 포함되지 않습니다. 후속 구현 시 다음 원칙을 적용합니다.
+ChromaDB 자체는 PostgreSQL migration 대상이 아니며 선택한 BGE Provider가 다음 원칙으로 동기화합니다.
 
 1. PostgreSQL Demand를 관계형 원본으로 둡니다.
 2. `demand_id`를 Chroma document ID로 사용해 upsert합니다.
-3. model revision과 embedding text 조합 버전을 collection metadata에 남깁니다.
+3. collection metadata에 embedding model name을 기록하고 다른 모델의 기존 collection은 거부합니다.
 4. Chroma 검색 ID를 PostgreSQL Demand와 조인한 뒤 API 후보로 반환합니다.
 5. Case, Decision, Receipt, 사용자 정보를 Chroma에 저장하지 않습니다.
+
+Demand create/update/deactivate API는 PostgreSQL transaction을 먼저 완료하고 Chroma upsert/delete를 수행합니다. 외부 index 실패 시 PostgreSQL 변경은 보존되고 API가 `503 DEMAND_INDEX_UNAVAILABLE`로 알립니다. 시작 시 또는 `POST /api/v1/demands/index/sync`로 활성 전체를 upsert하고 stale ID를 삭제할 수 있습니다. 운영 제품에서는 이 동기화를 transactional outbox와 재시도 worker로 발전시켜야 합니다.
 
 ## 7. Migration과 테스트
 
 - 초기 schema: `backend/alembic/versions/0001_initial_schema.py`
 - Productization 기반: `backend/alembic/versions/0002_productization_foundations.py`
+- Demand lifecycle: `backend/alembic/versions/0003_demand_runtime.py`
 - 적용: `alembic upgrade head`
 - 롤백: 개발 환경에서만 `alembic downgrade -1`
 - 테스트는 SQLite의 type variant를 사용하지만 PostgreSQL migration도 별도로 실행 검증해야 합니다.
@@ -315,7 +320,7 @@ ChromaDB와 실제 BGE Adapter는 현재 migration에 포함되지 않습니다.
 - SSO/OIDC, 사용자·조직·사업장 tenant와 key lifecycle 테이블
 - 범용 idempotency request hash·처리 상태 테이블
 - Decision versioning과 재개 정책
-- 실제 BGE/Chroma index metadata
+- Demand index sync outbox·재시도 상태와 index revision
 - PostgreSQL lock timeout·deadlock 관찰과 다중 worker 부하 테스트
 - 개인정보 보존·삭제와 DB backup 정책
 - 실제 인계 증빙이 필요한 경우 별도 도메인·법적 설계
