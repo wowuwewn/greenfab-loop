@@ -132,45 +132,46 @@ def similarity_search(db:Chroma, query, k):
     return docs, scores
 
 def rule_check(docs, scores, passport:dict):
+    #passport 파일 내 개별 건에 대해서 수행
     
     report = {}
     report['model'] = 'BAAI/bge-m3'
     report['created_at'] = f"{datetime.now().astimezone().isoformat()}"
     
+    #candidate별 match 확인
     candidates = []
     for doc,score in zip(docs,scores):
         candidate = {}
         
         meta = doc.metadata
         
+        # 빠진 필드 모음
         missing = []
-        #report['demand_id'] = meta['demand_id'] if meta['demand_id'] else None
+        
+        #demand_id 체크
         if meta['demand_id'] is None:
             candidate['demand_id'] = None
             missing.append('demand_id')
         else:
             candidate['demand_id'] = meta['demand_id']
-        
+        #company_name 체크
         if meta['company_name'] is None:
             candidate['company_name'] = None
             missing.append('company_name')
         else:
             candidate['company_name'] = meta['company_name']
         
+        #demand_description 체크
         if meta['demand_description'] is None:
             candidate['demand_description'] = None
             missing.append('demand_description')
         else:
             candidate['demand_description'] = meta['demand_description']
-            
-        #report['company_name'] = meta['company_name']
-        #report['demand_description'] = meta['demand_description']
-        #report['']
-        candidate['semantic_similarity'] = score
         
-        #quantity_report = f"Passport: {passport['quantity']['value']} Demand: {meta['quantity_min']} ~ {meta['quantity_max']}"
-        #report.append(quantity_report)
+        #의미적 유사도 기록    
+        candidate['semantic_similarity'] = max(score,0.0)
         
+        #필요 수량 체크
         if meta.get('required_quantity') is None:
             quantity_check = None
             missing.append('required_quantity')
@@ -179,23 +180,24 @@ def rule_check(docs, scores, passport:dict):
         else:
             quantity_check = False
         
+        #위치 체크(임시)
         if meta.get('location') is None:
             location_check = None
             missing.append('location')
         else:
             location_check = True
          
-            
+        #규칙 체크    
         candidate["rule_check"] = {
             "quantity": quantity_check,
             "required_info": False if len(missing)>0 else True,
             "location": location_check,
             "missing_field": missing
         }
-        
+        #상태(미완성)
         candidate['status']='REVIEW'
         candidates.append(candidate)
-        #total_report.append(report)
+
     report['candidates'] = candidates  
     json_report = json.dumps(report, ensure_ascii= False, indent=2)
     return json_report
