@@ -92,7 +92,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 ### `BgeChromaMatchProvider`
 
 - `MATCH_PROVIDER=bge_chroma`로 명시적으로 선택합니다.
-- optional `match` dependency를 설치한 프로세스에서 BGE-M3 모델을 한 번 로드합니다.
+- optional `match` dependency를 설치한 프로세스에서 고정 revision의 BGE-M3 모델을 한 번 로드합니다.
 - CPU가 기본이며 `BGE_DEVICE`로 다른 장치를 명시할 수 있습니다.
 - 공식 모델 카드 기준 약 567M parameters/4.59GB 모델이므로 core image에 포함하지 않고 CPU 기본 batch를 4로 제한합니다.
 - PostgreSQL의 활성 Demand를 `demand_id` 기준으로 ChromaDB에 upsert하고 비활성 ID는 삭제합니다.

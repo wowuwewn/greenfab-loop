@@ -78,6 +78,11 @@ class Settings(BaseSettings):
 
     match_provider: Literal["mock", "bge_chroma"] = "mock"
     bge_model_name: str = "BAAI/bge-m3"
+    bge_model_revision: str = Field(
+        default="5617a9f61b028005a4858fdac845db406aefb181",
+        min_length=7,
+        max_length=64,
+    )
     bge_device: str = "cpu"
     bge_batch_size: int = Field(default=4, ge=1, le=256)
     chroma_mode: Literal["persistent", "http"] = "persistent"

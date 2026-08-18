@@ -73,6 +73,9 @@ class FakeClient:
     def get_or_create_collection(self, *, name, metadata):
         assert name == "test-demands"
         assert metadata["hnsw:space"] == "cosine"
+        assert metadata["embedding_revision"] == ("5617a9f61b028005a4858fdac845db406aefb181")
+        if not hasattr(self.collection, "metadata"):
+            self.collection.metadata = metadata
         return self.collection
 
 
@@ -82,10 +85,11 @@ def test_adapter_loads_model_once_and_keeps_only_demand_ids_in_chroma() -> None:
     client = FakeClient(collection)
     factory_calls = 0
 
-    def model_factory(model_name, device):
+    def model_factory(model_name, model_revision, device):
         nonlocal factory_calls
         factory_calls += 1
         assert model_name == "BAAI/bge-m3"
+        assert model_revision == "5617a9f61b028005a4858fdac845db406aefb181"
         assert device == "cpu"
         return model
 
@@ -98,6 +102,9 @@ def test_adapter_loads_model_once_and_keeps_only_demand_ids_in_chroma() -> None:
     adapter.ready()
     assert factory_calls == 1
     assert client.heartbeats == 2
+    assert adapter.snapshot_id == (
+        "BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181:test-demands"
+    )
 
     indexed = adapter.upsert(
         [
@@ -125,11 +132,29 @@ def test_adapter_rejects_nonempty_collection_from_another_embedding_model() -> N
     collection.metadata = {"embedding_model": "another/model"}
     adapter = BgeM3ChromaAdapter(
         collection_name="test-demands",
-        model_factory=lambda _model_name, _device: FakeModel(),
+        model_factory=lambda _model_name, _model_revision, _device: FakeModel(),
         client_factory=lambda: FakeClient(collection),
     )
 
-    with pytest.raises(RuntimeError, match="embedding_model"):
+    with pytest.raises(RuntimeError, match="embedding model or revision"):
+        adapter.ready()
+
+
+def test_adapter_rejects_nonempty_collection_from_another_model_revision() -> None:
+    collection = FakeCollection()
+    collection.documents["OLD"] = "legacy embedding"
+    collection.metadata = {
+        "hnsw:space": "cosine",
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_revision": "old-revision",
+    }
+    adapter = BgeM3ChromaAdapter(
+        collection_name="test-demands",
+        model_factory=lambda _model_name, _model_revision, _device: FakeModel(),
+        client_factory=lambda: FakeClient(collection),
+    )
+
+    with pytest.raises(RuntimeError, match="model or revision"):
         adapter.ready()
 
 
@@ -256,6 +281,7 @@ def test_provider_factory_keeps_heavy_runtime_optional() -> None:
 
     configured = build_match_provider(Settings(match_provider="bge_chroma"))
     assert isinstance(configured, BgeChromaMatchProvider)
+    assert configured.adapter.model_revision == ("5617a9f61b028005a4858fdac845db406aefb181")
     # Construction itself must not import sentence-transformers/chromadb or load weights.
     assert configured.adapter._model is None
     assert configured.adapter._client is None

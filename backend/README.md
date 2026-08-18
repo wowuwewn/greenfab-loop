@@ -93,7 +93,8 @@ alembic revision --autogenerate -m "describe change"
 | `EVIDENCE_*` | `.env.example` 참고 | 로컬 Evidence 경로와 최대 upload 크기 |
 | `DETECT_ARTIFACT_MAX_BYTES` | `20971520` | Detect import artifact 최대 크기 |
 | `MATCH_PROVIDER` | `mock` | `mock` 또는 명시적인 `bge_chroma`; 장애 시 자동 fallback 없음 |
-| `BGE_MODEL_NAME`, `BGE_DEVICE` | `BAAI/bge-m3`, `cpu` | embedding 모델과 CPU-first 실행 장치 |
+| `BGE_MODEL_NAME`, `BGE_MODEL_REVISION` | `BAAI/bge-m3`, `5617a9f…` | embedding 모델과 고정 Hugging Face revision |
+| `BGE_DEVICE` | `cpu` | CPU-first 실행 장치; CUDA는 명시 선택 |
 | `BGE_BATCH_SIZE` | `4` | CPU 메모리를 고려한 보수적인 embedding batch |
 | `CHROMA_MODE` | `persistent` | embedded persistent client 또는 `http` server |
 | `CHROMA_*` | `.env.example` 참고 | collection, 경로 또는 HTTP 연결 설정 |
@@ -143,6 +144,8 @@ embedded persistent Chroma를 사용할 때 `.env`를 다음처럼 설정합니�
 
 ```text
 MATCH_PROVIDER=bge_chroma
+BGE_MODEL_NAME=BAAI/bge-m3
+BGE_MODEL_REVISION=5617a9f61b028005a4858fdac845db406aefb181
 BGE_DEVICE=cpu
 BGE_BATCH_SIZE=4
 CHROMA_MODE=persistent
@@ -158,6 +161,8 @@ CHROMA_MODE=http
 CHROMA_HOST=chroma
 CHROMA_PORT=8000
 ```
+
+Compose의 Chroma host port는 로컬 점검용으로 `127.0.0.1`에만 bind됩니다. 인증과 TLS를 별도로 구성하기 전에는 Chroma port를 외부 네트워크에 공개하지 않습니다. 기본 모델 revision은 [BAAI/bge-m3의 검증된 commit](https://huggingface.co/BAAI/bge-m3/commit/5617a9f61b028005a4858fdac845db406aefb181)으로 고정하며, revision을 바꾸면 별도 collection으로 재색인해야 합니다.
 
 ```bash
 docker compose --profile match up --build
@@ -262,7 +267,7 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 
 `MATCH_PROVIDER=bge_chroma`는 실제 `BgeM3ChromaAdapter`를 선택합니다.
 
-- BGE-M3는 프로세스 시작 시 한 번 로드
+- BGE-M3는 고정 revision으로 프로세스 시작 시 한 번 로드
 - CPU 기본, CUDA 명시 선택
 - PostgreSQL 활성 Demand를 `demand_id`로 ChromaDB upsert하고 비활성 ID는 삭제
 - Chroma에는 검색 문서와 ID만 저장하고, 후보·Rule 필드는 매 요청 PostgreSQL에서 다시 조회

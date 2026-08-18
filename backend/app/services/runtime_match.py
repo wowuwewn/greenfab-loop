@@ -26,7 +26,7 @@ from app.services.match import (
 )
 from app.services.rules import ResourcePassportInput, evaluate_rules
 
-ModelFactory = Callable[[str, str], Any]
+ModelFactory = Callable[[str, str, str], Any]
 ClientFactory = Callable[[], Any]
 
 
@@ -37,6 +37,7 @@ class BgeM3ChromaAdapter:
         self,
         *,
         model_name: str = "BAAI/bge-m3",
+        model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181",
         device: str = "cpu",
         batch_size: int = 4,
         collection_name: str = "greenfab_demands",
@@ -50,6 +51,7 @@ class BgeM3ChromaAdapter:
         client_factory: ClientFactory | None = None,
     ) -> None:
         self.model_name = model_name
+        self.model_revision = model_revision
         self.device = device
         self.batch_size = batch_size
         self.collection_name = collection_name
@@ -69,7 +71,7 @@ class BgeM3ChromaAdapter:
 
     @property
     def snapshot_id(self) -> str:
-        return f"{self.model_name}@{self.collection_name}"
+        return f"{self.model_name}@{self.model_revision}:{self.collection_name}"
 
     def ready(self) -> None:
         client = self._get_client()
@@ -140,7 +142,11 @@ class BgeM3ChromaAdapter:
         if self._model is None:
             with self._model_lock:
                 if self._model is None:
-                    self._model = self._model_factory(self.model_name, self.device)
+                    self._model = self._model_factory(
+                        self.model_name,
+                        self.model_revision,
+                        self.device,
+                    )
         return self._model
 
     def _get_client(self) -> Any:
@@ -155,26 +161,34 @@ class BgeM3ChromaAdapter:
             client = self._get_client()
             collection = client.get_or_create_collection(
                 name=self.collection_name,
-                metadata={"hnsw:space": "cosine", "embedding_model": self.model_name},
+                metadata={
+                    "hnsw:space": "cosine",
+                    "embedding_model": self.model_name,
+                    "embedding_revision": self.model_revision,
+                },
             )
             metadata = getattr(collection, "metadata", None) or {}
             indexed_model = metadata.get("embedding_model")
-            if collection.count() > 0 and indexed_model != self.model_name:
+            indexed_revision = metadata.get("embedding_revision")
+            if collection.count() > 0 and (
+                indexed_model != self.model_name or indexed_revision != self.model_revision
+            ):
                 raise RuntimeError(
-                    "Non-empty Chroma collection embedding_model does not match BGE_MODEL_NAME"
+                    "Non-empty Chroma collection embedding model or revision does not match "
+                    "the configured BGE runtime"
                 )
             self._collection = collection
         return self._collection
 
     @staticmethod
-    def _default_model_factory(model_name: str, device: str) -> Any:
+    def _default_model_factory(model_name: str, model_revision: str, device: str) -> Any:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:  # pragma: no cover - exercised without optional extra
             raise RuntimeError(
                 'BGE runtime is not installed; install the backend with ".[match]"'
             ) from exc
-        return SentenceTransformer(model_name, device=device)
+        return SentenceTransformer(model_name, revision=model_revision, device=device)
 
     def _default_client_factory(self) -> Any:
         try:
@@ -292,6 +306,7 @@ def build_match_provider(
     if settings.match_provider == "bge_chroma":
         adapter = BgeM3ChromaAdapter(
             model_name=settings.bge_model_name,
+            model_revision=settings.bge_model_revision,
             device=settings.bge_device,
             batch_size=settings.bge_batch_size,
             collection_name=settings.chroma_collection_name,
