@@ -1,9 +1,30 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.enums import ApiRole
+
+
+class ApiKeyCredential(BaseModel):
+    """One API principal configured by a SHA-256 secret digest."""
+
+    key_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    secret_sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
+    actor: str = Field(min_length=1, max_length=120)
+    role: ApiRole
+
+    @field_validator("actor")
+    @classmethod
+    def strip_actor(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("actor cannot be blank")
+        return stripped
 
 
 class Settings(BaseSettings):
@@ -21,17 +42,153 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = "postgresql+psycopg://greenfab:greenfab@localhost:5432/greenfab"
     database_echo: bool = False
+    database_pool_size: int = Field(default=5, ge=1, le=50)
+    database_max_overflow: int = Field(default=10, ge=0, le=100)
+    database_pool_timeout_seconds: int = Field(default=10, ge=1, le=120)
     demo_mode: bool = True
     seed_demo_data: bool = True
     demo_reset_enabled: bool = False
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    auth_mode: Literal["demo", "required"] = "demo"
+    api_key_credentials: list[ApiKeyCredential] = Field(default_factory=list)
+    demo_actor: str = Field(default="demo_operator", min_length=1, max_length=120)
+    evidence_storage_backend: Literal["local", "s3"] = "local"
+    evidence_storage_root: Path = Path("var/evidence")
+    evidence_s3_bucket: str = ""
+    evidence_s3_prefix: str = "greenfab/evidence"
+    evidence_s3_region: str | None = None
+    evidence_s3_endpoint_url: str | None = None
+    evidence_s3_access_key_id: SecretStr | None = None
+    evidence_s3_secret_access_key: SecretStr | None = None
+    evidence_s3_session_token: SecretStr | None = None
+    evidence_s3_addressing_style: Literal["auto", "path", "virtual"] = "auto"
+    evidence_s3_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)
+    evidence_s3_read_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    evidence_s3_max_attempts: int = Field(default=2, ge=1, le=5)
+    evidence_max_bytes: int = Field(default=5 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
+    detect_artifact_max_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        ge=1024,
+        le=100 * 1024 * 1024,
+    )
+
+    @field_validator("demo_actor")
+    @classmethod
+    def strip_demo_actor(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("DEMO_ACTOR cannot be blank")
+        return stripped
+
+    @field_validator("database_url")
+    @classmethod
+    def use_psycopg_driver_for_render_postgres(cls, value: str) -> str:
+        """Normalize Render's connectionString for the installed psycopg v3 driver."""
+
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
+
+    @field_validator(
+        "evidence_s3_bucket",
+        "evidence_s3_prefix",
+        mode="before",
+    )
+    @classmethod
+    def strip_storage_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip()
+
+    @field_validator("evidence_s3_region", "evidence_s3_endpoint_url", mode="before")
+    @classmethod
+    def strip_optional_storage_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip() or None
+
+    @field_validator("cors_origins")
+    @classmethod
+    def reject_wildcard_cors(cls, value: list[str]) -> list[str]:
+        origins = [origin.strip().rstrip("/") for origin in value if origin.strip()]
+        if not origins or "*" in origins:
+            raise ValueError("CORS_ORIGINS must contain explicit origins")
+        return list(dict.fromkeys(origins))
+
+    match_provider: Literal["mock", "bge_chroma"] = "mock"
+    bge_model_name: str = "BAAI/bge-m3"
+    bge_model_revision: str = Field(
+        default="5617a9f61b028005a4858fdac845db406aefb181",
+        min_length=7,
+        max_length=64,
+    )
+    bge_device: str = "cpu"
+    bge_batch_size: int = Field(default=4, ge=1, le=256)
+    match_max_concurrency: int = Field(default=1, ge=1, le=16)
+    match_queue_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    match_pending_timeout_seconds: int = Field(default=120, ge=30, le=3600)
+    # v0.1 ships one reserved evaluator contract. A configurable key without
+    # a trusted provisioning path would make production Match impossible.
+    match_rule_policy_key: Literal["match-deterministic-v0"] = "match-deterministic-v0"
+    chroma_mode: Literal["persistent", "http"] = "persistent"
+    chroma_collection_name: str = "greenfab_demands"
+    chroma_persist_directory: str = ".data/chroma"
+    chroma_host: str = "localhost"
+    chroma_port: int = Field(default=8001, ge=1, le=65535)
+    chroma_ssl: bool = False
+    chroma_headers: dict[str, str] = Field(default_factory=dict)
+    demand_index_sync_on_startup: bool = True
 
     @model_validator(mode="after")
     def forbid_demo_mutations_in_production(self) -> "Settings":
-        if self.environment.casefold() == "production" and (
-            self.seed_demo_data or self.demo_reset_enabled
+        environment = self.environment.strip().casefold()
+        demo_environments = {"development", "test", "local"}
+        if environment not in demo_environments and (
+            self.demo_mode or self.seed_demo_data or self.demo_reset_enabled
         ):
-            raise ValueError("SEED_DEMO_DATA and DEMO_RESET_ENABLED must be false in production")
+            raise ValueError(
+                "DEMO_MODE, SEED_DEMO_DATA, and DEMO_RESET_ENABLED must be false "
+                "outside development, test, or local"
+            )
+        if environment == "production":
+            if self.auth_mode != "required":
+                raise ValueError("AUTH_MODE must be required in production")
+            if self.evidence_storage_backend != "s3":
+                raise ValueError(
+                    "EVIDENCE_STORAGE_BACKEND must be s3 in production; Render's local "
+                    "filesystem is ephemeral"
+                )
+        if self.auth_mode == "demo" and environment not in demo_environments:
+            raise ValueError("AUTH_MODE=demo is allowed only in development, test, or local")
+        if self.auth_mode == "demo" and not self.demo_mode:
+            raise ValueError("AUTH_MODE=demo requires DEMO_MODE=true")
+        if self.auth_mode == "required" and not self.api_key_credentials:
+            raise ValueError("API_KEY_CREDENTIALS must contain at least one key in required mode")
+        key_ids = [credential.key_id for credential in self.api_key_credentials]
+        if len(key_ids) != len(set(key_ids)):
+            raise ValueError("API_KEY_CREDENTIALS key_id values must be unique")
+        secret_hashes = [
+            credential.secret_sha256.casefold() for credential in self.api_key_credentials
+        ]
+        if len(secret_hashes) != len(set(secret_hashes)):
+            raise ValueError("API_KEY_CREDENTIALS secret hashes must be unique")
+        if self.evidence_storage_backend == "s3":
+            if not self.evidence_s3_bucket:
+                raise ValueError("EVIDENCE_S3_BUCKET is required for s3 storage")
+            if self.evidence_s3_access_key_id is None:
+                raise ValueError("EVIDENCE_S3_ACCESS_KEY_ID is required for s3 storage")
+            if self.evidence_s3_secret_access_key is None:
+                raise ValueError("EVIDENCE_S3_SECRET_ACCESS_KEY is required for s3 storage")
+            if (
+                environment not in demo_environments
+                and self.evidence_s3_endpoint_url
+                and not self.evidence_s3_endpoint_url.casefold().startswith("https://")
+            ):
+                raise ValueError(
+                    "EVIDENCE_S3_ENDPOINT_URL must use HTTPS outside local environments"
+                )
         return self
 
 

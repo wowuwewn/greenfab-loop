@@ -18,7 +18,8 @@
 ```mermaid
 flowchart LR
     U["현장·환경/자원 담당자"] --> F["Vite / React Frontend"]
-    F -->|"JSON over HTTP /api/v1"| B["FastAPI Backend"]
+    F -->|"JSON over HTTP /api/v1"| A["API Key / Role Boundary"]
+    A --> B["FastAPI Backend"]
 
     B --> W["Workflow Service"]
     W --> P[("PostgreSQL")]
@@ -27,13 +28,15 @@ flowchart LR
     W --> R["Deterministic Rule Service"]
     W --> S["Scenario Service"]
     W --> G["Receipt Service"]
+    W --> E["Passport Evidence Service"]
+    E --> L[("Local dev storage\nFuture object storage")]
 
     DP["Offline Detect Pipeline\nLightGBM · OOF · SHAP"] --> O["dashboard_data.json"]
     O --> D
     D --> P
 
     M --> MM["MockMatchProvider"]
-    M --> BM["Future BGE/Chroma Adapter\nBAAI/bge-m3"]
+    M --> BM["Optional BGE/Chroma Runtime\nBAAI/bge-m3"]
     BM --> C[("ChromaDB\nDemand vectors")]
     BM --> P
     R --> P
@@ -45,10 +48,10 @@ flowchart LR
 | --- | --- | --- |
 | Frontend | Case 조회, 사용자 입력, 단계별 결과 표시, 오류·재시도 UX | 상태 전이 우회, AI 판단 생성, 브라우저 메모리를 최종 저장소로 사용 |
 | FastAPI | API, 입력 검증, 트랜잭션, 상태 전이, Provider 호출, 응답 조립 | 요청마다 Detect 모델 학습, 의미 유사도를 최종 적합성으로 해석 |
-| PostgreSQL | Case, 확인, Passport, Demand 원본, Match 실행, Decision, Scenario, Receipt, Audit 저장 | 벡터 최근접 검색 |
+| PostgreSQL | Case, Detect provenance, 확인, Passport/Evidence metadata, Demand, Match, Decision, Scenario, Receipt, Audit, Rule policy 저장 | 벡터 최근접 검색, evidence binary 저장 |
 | Offline Detect | 동일 Fold 모델 비교, LightGBM/OOF/SHAP 결과 생성 | Resource·폐기물·재활용 정보를 추론 |
-| Detect Seed / Adapter | 검증된 Detect 산출물을 Data Contract의 `case`로 변환·적재 | 원본 결과에 공정 의미를 임의 부여 |
-| BGE-M3 / ChromaDB | Passport 텍스트와 DEMO Demand 텍스트의 Top-k 의미 유사도 검색 | 안전성·성공확률·실제 산업 적합성 판단 |
+| Detect Import | 검증된 Detect 산출물을 hash 기반으로 idempotent Case upsert | 원본 결과에 공정 의미를 임의 부여, 기존 Workflow 초기화 |
+| BGE-M3 / ChromaDB | Passport 텍스트와 활성 Demand 텍스트의 Top-k 의미 유사도 검색 | 안전성·성공확률·실제 산업 적합성 판단 |
 | Rule Service | 수량, 필수정보, 위치 등 명시적 조건의 결정론적 검사 | LLM 기반 조건 생성, 최종 승인·거절 |
 | Human Decision | 후보 선택과 `APPROVED`, `HOLD`, `REJECTED` 입력 | AI가 대신 수행할 수 없음 |
 | Scenario Service | 사용자 입력값과 명시된 수식으로 후보 전환량 계산 | 검증되지 않은 탄소 감축량이나 실제 전환 실적 생성 |
@@ -57,12 +60,12 @@ flowchart LR
 ## 4. 실행 파이프라인
 
 1. Offline Detect Pipeline이 실제 SECOM 입력으로 위험 순위와 SHAP 결과를 생성합니다.
-2. 현재 MVP seed가 검증 산출물에서 확인한 Golden Case 필드를 `case` 형식으로 PostgreSQL에 적재합니다. 파일 자동 import Adapter는 후속 범위입니다.
+2. Golden seed 또는 Detect CLI가 검증 산출물을 `case`와 provenance 형식으로 PostgreSQL에 적재합니다.
 3. 사람이 실제 Resource 발생 여부를 `CONFIRMED` 또는 `NOT_CONFIRMED`로 입력합니다.
 4. `CONFIRMED`인 경우에만 DEMO Resource Passport를 저장합니다.
 5. Backend가 Passport를 현재 설정된 Match Provider에 전달합니다.
 6. Match Provider가 후보를 반환하고 Rule Service가 명시적 조건을 검사합니다.
-7. Backend가 Match 실행과 후보를 하나의 트랜잭션으로 저장합니다.
+7. Backend가 짧은 persist transaction에서 입력 snapshot을 재검증하고 Match 후보를 저장합니다.
 8. 사람이 후보와 근거를 확인한 뒤 최종 Decision을 입력합니다.
 9. Scenario Service가 `candidate_diversion_quantity`만 계산합니다.
 10. Receipt Service가 전체 결정 상태를 스냅샷으로 저장합니다.
@@ -76,7 +79,7 @@ Backend는 Match 구현에 직접 의존하지 않고 동일한 인터페이스�
 ```text
 MatchProvider.match(passport, top_k) -> MatchResult
 ├─ MockMatchProvider
-└─ Future BGE/Chroma Adapter
+└─ BgeChromaMatchProvider -> BgeM3ChromaAdapter
 ```
 
 ### `MockMatchProvider`
@@ -86,15 +89,25 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - 저장된 점수는 runtime 추론값이 아니라 사전 생성된 snapshot 값이며 `model`, `model_revision`으로 출처를 구분합니다. 외부 `match.created_at`은 snapshot 생성시각이 아니라 현재 Match Run의 완료 시각입니다.
 - 고정 snapshot을 실제 산업 적합성·안전성·재활용 성공확률로 해석하지 않습니다.
 
-### Future BGE/Chroma Adapter
+### `BgeChromaMatchProvider`
 
-- 현재 PR에는 구현하지 않고 `SemanticSearchAdapter` 경계만 제공합니다.
-- 서버 시작 시 BGE-M3 모델을 한 번 로드합니다.
-- PostgreSQL의 DEMO Demand를 `demand_id` 기준으로 ChromaDB에 upsert합니다.
+- `MATCH_PROVIDER=bge_chroma`로 명시적으로 선택합니다.
+- optional `match` dependency를 설치한 프로세스에서 고정 revision의 BGE-M3 모델을 한 번 로드합니다.
+- CPU가 기본이며 `BGE_DEVICE`로 다른 장치를 명시할 수 있습니다.
+- 공식 모델 카드 기준 약 567M parameters/4.59GB 모델이므로 core image에 포함하지 않고 CPU 기본 batch를 4로 제한합니다.
+- PostgreSQL의 활성 Demand를 `demand_id` 기준으로 ChromaDB에 upsert하고 비활성 ID는 삭제합니다.
+- vector metadata의 Demand version/hash가 PostgreSQL과 다르면 stale hit를 버립니다.
+- version/hash가 없는 legacy hit도 현재 Demand에 wildcard로 결합하지 않고 제외합니다.
+- 비어 있고 lineage metadata가 없는 legacy collection은 cosine/model/revision metadata로 안전하게 재생성하며, 데이터가 있는 legacy collection은 재색인을 요구하며 시작을 거부합니다.
 - 실제 계산된 `semantic_similarity`와 Top-k 후보를 반환합니다.
-- CPU를 기본 지원하고 GPU는 환경 설정으로 선택합니다.
+- query/document embedding을 normalize하고 cosine distance `d`를 `1 - d` similarity로 변환합니다.
+- Chroma hit의 ID를 PostgreSQL Demand와 다시 조인한 후 deterministic Rule을 실행합니다.
+- stale ID를 고려해 overfetch하고 활성 PostgreSQL 후보 Top-3만 반환합니다.
+- 모델은 lazy single load, CPU 기본, 프로세스당 concurrency 1 기본입니다.
+- embedded 모델·collection 접근은 한 프로세스 안에서 Match와 index mutation 사이에 직렬화됩니다.
+- embedded persistent client와 별도 HTTP Chroma server를 모두 지원합니다.
 
-현재 애플리케이션은 기본 `MockMatchProvider`를 사용하며 테스트에서는 `create_app(match_provider=...)`로 Provider를 주입할 수 있습니다. 실제 BGE Adapter가 추가되면 환경 설정으로 Provider를 명시적으로 선택해야 합니다. BGE 장애 시 Backend가 조용히 Mock 결과로 대체하면 안 되며 `503 MATCH_UNAVAILABLE`로 알려야 합니다.
+기본은 반복 가능한 `MockMatchProvider`입니다. BGE runtime을 선택한 뒤 모델·Chroma가 실패하면 시작/readiness 또는 Match가 실패하며 Mock으로 조용히 대체하지 않습니다. 테스트에서는 `create_app(match_provider=...)`로 fake Provider를 주입합니다.
 
 ## 6. 데이터 저장 경계
 
@@ -104,6 +117,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - Match 실행 당시 모델명, 후보, Rule 결과 보관
 - 사용자 Decision과 Audit Event 보관
 - Scenario 입력·결과와 Receipt 스냅샷 보관
+- Detect import hash/model provenance, Evidence metadata, versioned Rule policy 보관
 - API 쓰기는 트랜잭션과 상태 검사를 통과해야 함
 
 ### ChromaDB
@@ -118,7 +132,8 @@ MatchProvider.match(passport, top_k) -> MatchResult
 
 - Detect 학습·OOF·SHAP은 오프라인 산출물로 관리합니다.
 - 현재 seed 값은 검증된 `dashboard_data.json` 산출물에서 복사한 값이며 API 요청 중 모델을 재학습하지 않습니다.
-- 파일을 직접 읽는 Detect Adapter는 후속 범위입니다.
+- CLI import는 artifact hash를 기준으로 Case를 upsert하고 기존 Workflow 진행 상태를 보존합니다.
+- Evidence binary는 Git/DB에 넣지 않고 개발 환경의 generated-key local storage에 저장합니다.
 - 원본 SECOM 데이터와 비밀값은 Git에 포함하지 않습니다.
 
 ## 7. 출처와 해석 경계
@@ -135,15 +150,16 @@ MatchProvider.match(passport, top_k) -> MatchResult
 
 ## 8. 트랜잭션과 장애 처리
 
-- 상태 변경 API는 SQLAlchemy transaction 안에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 현재 상태를 확인하고 관련 객체를 함께 저장합니다.
-- Match 실행과 후보 저장, Decision과 Audit Event, Receipt와 스냅샷 저장은 각각 원자적으로 처리합니다.
+- 상태 변경 API는 SQLAlchemy transaction 안에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠급니다. Match만 prepare→외부 inference→persist로 나뉘며 inference 중에는 transaction과 Case lock을 유지하지 않습니다.
+- Match는 짧은 prepare transaction, transaction 없는 provider inference, 짧은 persist transaction으로 분리합니다. persist 전에 Case·Passport·Demand·Rule 입력 snapshot과 execution token을 다시 검증하고, Rule 결과와 aggregate source type은 잠근 PostgreSQL Demand와 Passport에서 서버가 다시 계산합니다.
 - 잘못된 단계 요청은 `409 INVALID_STATE`로 거절합니다.
-- Match와 Receipt는 선택적 `Idempotency-Key`를 지원하며 UI에서는 매번 전송하는 것을 권장합니다.
+- Match와 Receipt는 선택적 `Idempotency-Key`를 지원하며 UI에서는 매번 전송하는 것을 권장합니다. Match의 오래된 PENDING lease는 새 execution token으로 안전하게 회수하고, 이전 inference 결과는 거부합니다.
 - Scenario는 Case당 하나만 저장하고 재요청 시 같은 결과를 반환합니다.
-- PostgreSQL 연결이 실패하면 readiness가 실패합니다. 현재 응답은 주입된 Provider class 이름도 함께 표시합니다.
+- PostgreSQL 또는 Evidence storage 접근이 실패하면 deep readiness가 실패합니다. 외부 platform의
+  restart probe는 process liveness만 보는 `/health/live`를 사용합니다. 응답은 주입된 Provider class 이름도 함께 표시합니다.
 - 미완성 객체를 저장하고 성공 응답을 반환하지 않습니다.
 - 모든 오류 응답에는 추적 가능한 `trace_id`를 포함합니다.
-- 같은 Case의 동시 상태 전이는 PostgreSQL row lock으로 직렬화합니다. 제품화 전에는 lock timeout·deadlock 관찰과 다중 worker 부하 테스트를 추가합니다.
+- 같은 Case와 같은 Demand의 동시 상태 전이는 PostgreSQL row lock으로 직렬화합니다. embedded BGE/Chroma index 연산은 현재 프로세스 안에서만 직렬화되므로 단일 API worker 배포를 사용해야 합니다. 다중 worker에는 PostgreSQL advisory lock 또는 전용 index worker가 필요합니다.
 
 ## 9. 실행·배포 기준
 
@@ -153,7 +169,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 frontend     Vite/React 정적 앱 또는 개발 서버
 backend      FastAPI + SQLAlchemy + Alembic
 postgres     PostgreSQL
-chroma       실제 BGE Provider 추가 후 선택적으로 구성
+chroma       BGE HTTP mode에서 Compose match profile로 선택 구성
 ```
 
 - 설정은 환경변수로 주입하고 `.env`는 Git에 올리지 않습니다.
@@ -161,7 +177,8 @@ chroma       실제 BGE Provider 추가 후 선택적으로 구성
 - `/api/v1/demo/reset`은 로컬 시연에서 `DEMO_RESET_ENABLED=true`일 때만 사용하고 공개 배포에서는 기본 비활성 상태를 유지합니다.
 - `GET /health/live`는 프로세스 생존 여부, `GET /health/ready`는 DB 연결과 주입된 Provider 이름을 확인합니다.
 - 스키마 변경은 Alembic migration으로만 적용합니다.
-- 운영 배포 전에는 인증·권한, 비밀 관리, 개인정보 처리, 백업 정책을 별도로 설계해야 합니다.
+- Production은 hash 기반 API key와 role을 필수로 사용합니다. SSO/OIDC, tenant,
+  key lifecycle, 개인정보 처리와 백업 정책은 별도 설계해야 합니다.
 
 ## 10. MVP 비범위
 
@@ -171,12 +188,14 @@ chroma       실제 BGE Provider 추가 후 선택적으로 구성
 - 법적 전자서명 또는 불변 원장
 - 실제 인계 완료를 확인하는 외부 증빙
 - 검증되지 않은 탄소·전력·폐기물 감축계수
-- 멀티테넌시와 세분화된 권한 관리
+- 멀티테넌시, SSO/OIDC와 세분화된 resource-level 권한 관리
+- Evidence의 malware scan·retention·orphan reconcile
 
 ## 11. 후속 구현 TODO
 
-- 운영 사용자 인증·조직·권한 모델
-- 실제 `BAAI/bge-m3` CPU-first Adapter와 ChromaDB lifecycle
-- Provider 선택 환경변수와 실제 모델 readiness probe
-- Detect 산출물 자동 import Adapter
+- 운영 SSO/OIDC·조직 tenant와 API key rotation/revocation
+- Detect import scheduler와 MES/QMS connector
+- Evidence malware scan, retention/deletion 및 orphan reconcile worker
+- Demand index event의 자동 재시도 worker·backoff·운영 관측
+- 다중 API worker용 분산 index lock 또는 단일 전용 index worker
 - 실제 인계 증빙이 필요할 경우 별도의 정책·API·법적 검토

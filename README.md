@@ -32,7 +32,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ## 현재 상태
 
-현재 프런트 Golden Demo 화면, SECOM Detect 재현 파이프라인, FastAPI·PostgreSQL·Alembic 기반 Backend Workflow가 구현되어 있습니다. Backend는 고정 Golden R01 Match snapshot으로 전체 흐름을 재현하며, 실제 BGE-M3·ChromaDB Adapter와 인증·권한은 후속 통합 범위입니다. 실행 방법과 API 순서는 [`backend/README.md`](backend/README.md)를 참고합니다.
+현재 프런트 Golden Demo 화면, SECOM Detect 재현 파이프라인, FastAPI·PostgreSQL·Alembic 기반 Backend Workflow가 구현되어 있습니다. Backend에는 API key 역할 경계, Detect artifact import, Passport Evidence 개발용 storage, versioned Rule policy catalog, 그리고 선택 가능한 실제 BAAI/bge-m3·ChromaDB Provider가 포함됩니다. 운영 SSO/tenant와 object storage는 후속 범위입니다. 실행 방법과 API 순서는 [`backend/README.md`](backend/README.md)를 참고합니다.
 
 ## 팀 작업 가이드
 

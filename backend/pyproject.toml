@@ -11,14 +11,25 @@ dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   "psycopg[binary]>=3.2,<4",
+  "python-multipart>=0.0.20,<1",
   "pydantic-settings>=2.7,<3",
   "sqlalchemy>=2.0.36,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [project.optional-dependencies]
+match = [
+  "chromadb>=0.6.3,<0.7",
+  "sentence-transformers>=3.3,<6",
+  "torch==2.7.1",
+]
+storage = [
+  "boto3>=1.35,<2",
+]
 dev = [
   "httpx>=0.28,<1",
+  "jsonschema>=4.23,<5",
+  "pyyaml>=6,<7",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7",
   "ruff>=0.9,<1",
@@ -31,6 +42,9 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "requires_match_runtime: needs the optional Chroma runtime; CI core tests exclude it",
+]
 
 [tool.ruff]
 line-length = 100

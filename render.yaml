@@ -1,0 +1,108 @@
+# Render Blueprint for the backend only. Syncing it creates paid resources.
+# Review docs/render-deployment.md and pricing before applying it in Render.
+services:
+  - type: web
+    name: greenfab-loop-api
+    runtime: python
+    rootDir: backend
+    region: singapore
+    plan: "pro plus"
+    numInstances: 1
+    autoDeployTrigger: checksPass
+    buildCommand: bash scripts/install_match_runtime.sh
+    preDeployCommand: alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health/live
+    maxShutdownDelaySeconds: 60
+    disk:
+      name: greenfab-match-state
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: APP_NAME
+        value: GreenFab Loop API
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: greenfab-loop-postgres
+          property: connectionString
+      - key: DATABASE_ECHO
+        value: "false"
+      - key: DATABASE_POOL_SIZE
+        value: "3"
+      - key: DATABASE_MAX_OVERFLOW
+        value: "2"
+      - key: DATABASE_POOL_TIMEOUT_SECONDS
+        value: "10"
+      - key: DEMO_MODE
+        value: "false"
+      - key: SEED_DEMO_DATA
+        value: "false"
+      - key: DEMO_RESET_ENABLED
+        value: "false"
+      - key: AUTH_MODE
+        value: required
+      - key: API_KEY_CREDENTIALS
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: EVIDENCE_STORAGE_BACKEND
+        value: s3
+      - key: EVIDENCE_S3_BUCKET
+        sync: false
+      - key: EVIDENCE_S3_PREFIX
+        value: greenfab/production/evidence
+      - key: EVIDENCE_S3_REGION
+        sync: false
+      - key: EVIDENCE_S3_ENDPOINT_URL
+        sync: false
+      - key: EVIDENCE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: EVIDENCE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: EVIDENCE_S3_ADDRESSING_STYLE
+        value: auto
+      - key: MATCH_PROVIDER
+        value: bge_chroma
+      - key: BGE_MODEL_NAME
+        value: BAAI/bge-m3
+      - key: BGE_MODEL_REVISION
+        value: 5617a9f61b028005a4858fdac845db406aefb181
+      - key: BGE_DEVICE
+        value: cpu
+      - key: BGE_BATCH_SIZE
+        value: "1"
+      - key: MATCH_MAX_CONCURRENCY
+        value: "1"
+      - key: MATCH_QUEUE_TIMEOUT_SECONDS
+        value: "30"
+      - key: MATCH_PENDING_TIMEOUT_SECONDS
+        value: "300"
+      - key: CHROMA_MODE
+        value: persistent
+      - key: CHROMA_COLLECTION_NAME
+        value: greenfab_demands
+      - key: CHROMA_PERSIST_DIRECTORY
+        value: /var/data/chroma
+      - key: DEMAND_INDEX_SYNC_ON_STARTUP
+        value: "true"
+      - key: HF_HOME
+        value: /var/data/huggingface
+      - key: SENTENCE_TRANSFORMERS_HOME
+        value: /var/data/huggingface/sentence-transformers
+      - key: XDG_CACHE_HOME
+        value: /var/data/cache
+
+databases:
+  - name: greenfab-loop-postgres
+    region: singapore
+    plan: basic-1gb
+    postgresMajorVersion: "16"
+    databaseName: greenfab
+    user: greenfab
+    ipAllowList: []
+    connectionPool: none
+    storageAutoscalingEnabled: false

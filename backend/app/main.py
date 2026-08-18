@@ -11,21 +11,66 @@ from app.config import settings
 from app.database import SessionLocal
 from app.errors import register_exception_handlers
 from app.seed import seed_demo_data
-from app.services.match import MatchProvider, MockMatchProvider
+from app.services.demand import (
+    complete_index_event,
+    create_index_event,
+    recover_pending_index_events,
+)
+from app.services.match import DemandIndexManager, MatchProvider
+from app.services.runtime_match import build_match_provider
+from app.storage import EvidenceStorage, build_evidence_storage
 
 
 def create_app(
     *,
     match_provider: MatchProvider | None = None,
+    evidence_storage: EvidenceStorage | None = None,
     seed_on_startup: bool | None = None,
 ) -> FastAPI:
     should_seed = settings.seed_demo_data if seed_on_startup is None else seed_on_startup
+    configured_provider = match_provider or build_match_provider(settings)
+    configured_storage = evidence_storage or build_evidence_storage(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        if should_seed:
+        sync_event_id: str | None = None
+        if should_seed or (
+            settings.demand_index_sync_on_startup
+            and isinstance(configured_provider, DemandIndexManager)
+        ):
             with SessionLocal.begin() as session:
-                seed_demo_data(session)
+                if should_seed:
+                    seed_demo_data(session)
+                if settings.demand_index_sync_on_startup and isinstance(
+                    configured_provider, DemandIndexManager
+                ):
+                    recover_pending_index_events(session)
+                    sync_event_id = create_index_event(
+                        session,
+                        operation="SYNC_ALL",
+                        requested_by="system",
+                    ).event_id
+        if settings.demand_index_sync_on_startup and isinstance(
+            configured_provider, DemandIndexManager
+        ):
+            try:
+                configured_provider.sync_all_demands()
+            except Exception as exc:
+                if sync_event_id is not None:
+                    with SessionLocal.begin() as session:
+                        complete_index_event(
+                            session,
+                            sync_event_id,
+                            status="FAILED",
+                            error_message=type(exc).__name__,
+                        )
+                raise
+            else:
+                if sync_event_id is not None:
+                    with SessionLocal.begin() as session:
+                        complete_index_event(session, sync_event_id, status="SUCCEEDED")
+        configured_provider.ready()
+        configured_storage.check_ready()
         yield
 
     application = FastAPI(
@@ -34,13 +79,15 @@ def create_app(
         description=("GreenFab Loop의 상태 전이와 Data Contract v0.1을 제공하는 MVP API"),
         lifespan=lifespan,
     )
-    application.state.match_provider = match_provider or MockMatchProvider()
+    application.state.match_provider = configured_provider
+    application.state.evidence_storage = configured_storage
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Trace-Id", "X-Total-Count", "X-Limit", "X-Offset"],
     )
 
     @application.middleware("http")

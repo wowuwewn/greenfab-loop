@@ -76,6 +76,8 @@ stateDiagram-v2
 - 알 수 없는 `condition`, `location`, `composition`은 `null`로 유지합니다.
 - Passport 변경은 Match 실행 전 `RESOURCE_CONFIRMED`, `PASSPORT_READY`에서만 허용합니다.
 - Match 이후 Passport를 바꾸려면 현재 MVP에서는 Demo reset 후 흐름을 다시 실행해야 합니다.
+- Evidence binary upload는 Passport 저장 후 Decision 전인 `PASSPORT_READY`, `MATCH_READY`에서만
+  허용하며 Workflow 상태를 바꾸지 않는 `PASSPORT_EVIDENCE_ADDED` Audit Event를 남깁니다.
 
 ### Match와 Rule
 
@@ -144,7 +146,7 @@ candidate_diversion_quantity = 0
 
 ## 6. 동시성·중복 요청
 
-- 모든 상태 변경은 SQLAlchemy transaction 안에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 현재 상태를 검사합니다. 같은 Case의 동시 전이는 PostgreSQL에서 직렬화됩니다.
+- 모든 DB 상태 변경은 대상 Case를 `SELECT ... FOR UPDATE`로 잠급니다. Match는 PENDING run/Passport hash/policy revision을 짧게 고정한 뒤 transaction 밖에서 provider inference를 실행하고, persist transaction에서 Passport와 Demand snapshot을 재검증합니다.
 - Match와 Receipt는 선택적 `Idempotency-Key`를 지원하고 Client가 항상 전송하는 것을 권장합니다.
 - `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자여야 합니다.
 - 같은 Case의 Match에서 같은 키를 재사용하면 기존 실행을 반환합니다. key 범위는 Case이므로 다른 Case에서는 같은 문자열을 사용할 수 있습니다.
@@ -176,7 +178,7 @@ Match의 모델명·snapshot ID 같은 실행 metadata는 `payload_json`에 명�
 
 ## 9. 후속 TODO
 
-- 인증 사용자 기준 actor 주입과 역할별 전이 권한
+- SSO/OIDC, 조직 tenant와 resource-level 권한
 - Decision versioning·HOLD 재개 정책
-- 실제 BGE/Chroma Provider 장애·재시도 상태
+- 실제 inference wall-clock timeout과 multi-worker 부하 제어
 - Idempotency request hash와 처리 중 상태를 저장하는 범용 테이블
