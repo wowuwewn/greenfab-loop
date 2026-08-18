@@ -330,8 +330,8 @@ export function ReceiptPage({
                 <h2 id="esg-title">ESG 시나리오</h2>
               </div>
               <p>
-                저장된 Passport 자원량과 사람의 최종 결정을 기준으로 후보 전환
-                가능량을 계산합니다.
+                저장된 자원량과 명시된 Scenario 가정을 바탕으로 경로별 예상
+                차이를 비교합니다.
               </p>
             </div>
             <EsgScenarioForm
