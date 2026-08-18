@@ -11,6 +11,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from google import genai
 from google.genai import types
 from chatbot import generate_answer_v3
+from datetime import datetime
 
 data_path = '../../data/demo/demands.json'
 
@@ -130,53 +131,73 @@ def similarity_search(db:Chroma, query, k):
     
     return docs, scores
 
-def rule_check(docs, passport:dict):
-    total_report = []
+def rule_check(docs, scores, passport:dict):
     
-    for doc in docs:
-        report = {}
+    report = {}
+    report['model'] = 'BAAI/bge-m3'
+    report['created_at'] = f"{datetime.now().astimezone().isoformat()}"
+    
+    candidates = []
+    for doc,score in zip(docs,scores):
+        candidate = {}
+        
         meta = doc.metadata
         
-        report['demand_id'] = meta['demand_id']
-        report['company_name'] = meta['company_name']
-        report['demand_description'] = meta['demand_description']
-
+        missing = []
+        #report['demand_id'] = meta['demand_id'] if meta['demand_id'] else None
+        if meta['demand_id'] is None:
+            candidate['demand_id'] = None
+            missing.append('demand_id')
+        else:
+            candidate['demand_id'] = meta['demand_id']
         
+        if meta['company_name'] is None:
+            candidate['company_name'] = None
+            missing.append('company_name')
+        else:
+            candidate['company_name'] = meta['company_name']
+        
+        if meta['demand_description'] is None:
+            candidate['demand_description'] = None
+            missing.append('demand_description')
+        else:
+            candidate['demand_description'] = meta['demand_description']
+            
+        #report['company_name'] = meta['company_name']
+        #report['demand_description'] = meta['demand_description']
+        #report['']
+        candidate['semantic_similarity'] = score
         
         #quantity_report = f"Passport: {passport['quantity']['value']} Demand: {meta['quantity_min']} ~ {meta['quantity_max']}"
         #report.append(quantity_report)
         
-        if passport.get('quantity') is None:
-            quantity_check = "null"
+        if meta.get('required_quantity') is None:
+            quantity_check = None
+            missing.append('required_quantity')
         elif passport['quantity'] >= meta.get('required_quantity', 0):
-            quantity_check = "pass"
+            quantity_check = True
         else:
-            quantity_check = "fail"
+            quantity_check = False
         
-        if meta.get('location'):
-            location_check = "pass"
+        if meta.get('location') is None:
+            location_check = None
+            missing.append('location')
         else:
-            location_check = "fail"
+            location_check = True
+         
             
-        report["rule_check"] = {
+        candidate["rule_check"] = {
             "quantity": quantity_check,
-            "location": location_check
+            "required_info": True if len(missing)>0 else False,
+            "location": location_check,
+            "missing_field": missing
         }
         
-        total_report.append(report)
-        
-        '''condition_report = f"Passport condition: {passport['condition']}"
-        report.append(condition_report)
-        
-        if any(condition in passport['condition'] for condition in meta['accepted_conditions']):
-            report.append('Pass')
-        else:
-            report.append('Fail')
-            
-        description = " ".join(report)
-        total_report.append(description)'''
-    
-    json_report = json.dumps(total_report, ensure_ascii= False, indent=2)
+        candidate['status']='REVIEW'
+        candidates.append(candidate)
+        #total_report.append(report)
+    report['candidates'] = candidates  
+    json_report = json.dumps(report, ensure_ascii= False, indent=2)
     return json_report
     
       
@@ -197,7 +218,7 @@ if __name__ == '__main__':
     
     docs, scores = similarity_search(data_db, query, 1)
     
-    report = rule_check(docs, passport[0])
+    report = rule_check(docs, scores, passport[0])
     print(report)
     ####
     #print([(doc.page_content, doc.metadata, score) for doc,score in zip(docs,scores)])
