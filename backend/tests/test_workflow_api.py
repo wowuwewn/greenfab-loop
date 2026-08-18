@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy import func, select
 
 from app.config import settings
@@ -8,12 +10,15 @@ from app.models import (
     AuditEvent,
     Case,
     Decision,
+    Demand,
     ESGScenario,
     MatchRun,
     Receipt,
     ResourceConfirmation,
+    ResourcePassport,
 )
 from app.seed import GOLDEN_CASE_ID
+from app.services.demand import demand_content_sha256
 
 CONFIRMATION = {
     "status": "CONFIRMED",
@@ -73,6 +78,8 @@ def test_golden_case_completes_full_workflow(client, session_factory) -> None:
     assert match.status_code == 200, match.text
     match_body = match.json()["match"]
     assert match_body["model"] == "Xenova/bge-m3"
+    assert match_body["rule_policy"]["policy_key"] == "match-deterministic-v0"
+    assert match_body["rule_policy"]["version"] == 1
     assert match_body["source_type"] == "DEMO"
     assert [candidate["demand_id"] for candidate in match_body["candidates"]] == [
         "D01",
@@ -255,9 +262,12 @@ def test_needs_info_candidate_cannot_be_approved(client) -> None:
 
 
 def test_match_provider_failure_does_not_leak_internal_details(client) -> None:
+    class ProviderBoom(Exception):
+        pass
+
     class FailingProvider:
         def match(self, passport, *, top_k=3):
-            raise RuntimeError("/private/model-cache: connection password=secret")
+            raise ProviderBoom("/private/model-cache: connection password=secret")
 
     _confirm_and_save_passport(client)
     client.app.state.match_provider = FailingProvider()
@@ -270,6 +280,270 @@ def test_match_provider_failure_does_not_leak_internal_details(client) -> None:
     assert body["error"]["code"] == "MATCH_UNAVAILABLE"
     assert "private" not in body["error"]["message"]
     assert "secret" not in body["error"]["message"]
+
+
+def test_match_rejects_passport_changed_during_external_inference(client, session_factory) -> None:
+    from app.services.match import MockMatchProvider
+
+    class PassportChangingProvider(MockMatchProvider):
+        def match(self, passport, *, top_k=3):
+            with session_factory.begin() as session:
+                stored = session.scalar(
+                    select(ResourcePassport).where(
+                        ResourcePassport.passport_id == passport.passport_id
+                    )
+                )
+                assert stored is not None
+                stored.description = f"{stored.description} changed"
+            return super().match(passport, top_k=top_k)
+
+    _confirm_and_save_passport(client)
+    client.app.state.match_provider = PassportChangingProvider()
+    response = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+        headers={"Idempotency-Key": "passport-race"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "PASSPORT_CHANGED_DURING_MATCH"
+    with session_factory() as session:
+        run = session.scalar(select(MatchRun).where(MatchRun.idempotency_key == "passport-race"))
+        assert run is not None
+        assert run.status.value == "FAILED"
+        assert run.error_message == "PASSPORT_CHANGED"
+
+
+def test_same_idempotency_key_is_rejected_while_match_is_pending(client, session_factory) -> None:
+    from app.services.match import MockMatchProvider
+    from app.services.workflow import prepare_match
+
+    _confirm_and_save_passport(client)
+    with session_factory.begin() as session:
+        prepare_match(
+            session,
+            GOLDEN_CASE_ID,
+            MockMatchProvider(),
+            top_k=3,
+            idempotency_key="pending-match",
+            rule_policy_key="match-deterministic-v0",
+        )
+
+    response = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+        headers={"Idempotency-Key": "pending-match"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "MATCH_IN_PROGRESS"
+
+
+def test_stale_pending_match_is_reclaimed_with_new_execution_token(client, session_factory) -> None:
+    from app.services.match import MockMatchProvider
+    from app.services.workflow import prepare_match, utcnow
+
+    _confirm_and_save_passport(client)
+    with session_factory.begin() as session:
+        prepared = prepare_match(
+            session,
+            GOLDEN_CASE_ID,
+            MockMatchProvider(),
+            top_k=3,
+            idempotency_key="stale-pending-match",
+            rule_policy_key="match-deterministic-v0",
+        )
+        run = session.get(MatchRun, prepared.match_run_id)
+        assert run is not None
+        run.created_at = utcnow() - timedelta(minutes=10)
+        old_token = run.execution_token
+
+    response = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+        headers={"Idempotency-Key": "stale-pending-match"},
+    )
+    assert response.status_code == 200, response.text
+    with session_factory() as session:
+        run = session.scalar(
+            select(MatchRun).where(MatchRun.idempotency_key == "stale-pending-match")
+        )
+        assert run is not None
+        assert run.status.value == "COMPLETED"
+        assert run.execution_token != old_token
+
+
+def test_old_completed_idempotency_key_is_explicitly_stale(client) -> None:
+    _confirm_and_save_passport(client)
+    endpoint = f"/api/v1/cases/{GOLDEN_CASE_ID}/matches"
+    assert (
+        client.post(
+            endpoint,
+            json={"top_k": 3},
+            headers={"Idempotency-Key": "match-generation-1"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            endpoint,
+            json={"top_k": 3},
+            headers={"Idempotency-Key": "match-generation-2"},
+        ).status_code
+        == 200
+    )
+    stale = client.post(
+        endpoint,
+        json={"top_k": 3},
+        headers={"Idempotency-Key": "match-generation-1"},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "IDEMPOTENCY_KEY_STALE"
+
+
+def test_match_rejects_demand_rule_change_during_inference(client, session_factory) -> None:
+    from app.services.match import MockMatchProvider
+
+    class DemandRuleChangingProvider(MockMatchProvider):
+        def match(self, passport, *, top_k=3):
+            with session_factory.begin() as session:
+                demand = session.get(Demand, "D01")
+                assert demand is not None
+                demand.required_fields = [*demand.required_fields, "condition"]
+                demand.version += 1
+                demand.content_sha256 = demand_content_sha256(demand)
+            return super().match(passport, top_k=top_k)
+
+    _confirm_and_save_passport(client)
+    client.app.state.match_provider = DemandRuleChangingProvider()
+    response = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DEMAND_CHANGED_DURING_MATCH"
+
+
+def test_match_persist_recomputes_rules_and_source_instead_of_trusting_provider(client) -> None:
+    from dataclasses import replace
+
+    from app.services.match import MockMatchProvider
+    from app.services.rules import RuleCheck
+
+    class TamperedProvider(MockMatchProvider):
+        def match(self, passport, *, top_k=3):
+            result = super().match(passport, top_k=top_k)
+            tampered_first = replace(
+                result.candidates[0],
+                rule_check=RuleCheck(
+                    quantity=False,
+                    required_info=True,
+                    location=None,
+                ),
+            )
+            return replace(
+                result,
+                source_type="REAL",
+                candidates=(tampered_first, *result.candidates[1:]),
+            )
+
+    _confirm_and_save_passport(client)
+    client.app.state.match_provider = TamperedProvider()
+    response = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["match"]
+    assert body["source_type"] == "DEMO"
+    assert body["candidates"][0]["rule_check"]["quantity"] is True
+    assert body["candidates"][0]["status"] == "REVIEW"
+
+
+def test_match_does_not_regress_case_when_decision_is_saved_during_inference(
+    client, session_factory
+) -> None:
+    from app.schemas import DecisionRequest
+    from app.services.match import MockMatchProvider
+    from app.services.workflow import save_decision
+
+    _confirm_and_save_passport(client)
+    assert (
+        client.post(
+            f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+            json={"top_k": 3},
+        ).status_code
+        == 200
+    )
+
+    class DecisionDuringProvider(MockMatchProvider):
+        def match(self, passport, *, top_k=3):
+            with session_factory.begin() as session:
+                save_decision(
+                    session,
+                    GOLDEN_CASE_ID,
+                    DecisionRequest(
+                        status="APPROVED",
+                        selected_demand_id="D01",
+                        reason="첫 번째 Match 결과를 검토하여 승인합니다.",
+                    ),
+                    actor="decision_owner",
+                )
+            return super().match(passport, top_k=top_k)
+
+    client.app.state.match_provider = DecisionDuringProvider()
+    response = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "CASE_CHANGED_DURING_MATCH"
+    reread = client.get(f"/api/v1/cases/{GOLDEN_CASE_ID}").json()
+    assert reread["decision"]["status"] == "APPROVED"
+    with session_factory() as session:
+        runs = list(session.scalars(select(MatchRun)).all())
+        assert sorted(run.status.value for run in runs) == ["COMPLETED", "FAILED"]
+
+
+def test_match_candidate_snapshot_is_immutable_and_changed_demand_requires_rematch(client) -> None:
+    _confirm_and_save_passport(client)
+    matched = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+    )
+    assert matched.status_code == 200
+    original_company = matched.json()["match"]["candidates"][0]["company_name"]
+
+    current = next(
+        item for item in client.get("/api/v1/demands").json() if item["demand_id"] == "D01"
+    )
+    update_payload = {
+        key: current[key]
+        for key in (
+            "company_name",
+            "demand_description",
+            "quantity_min",
+            "quantity_max",
+            "unit",
+            "location",
+            "accepted_conditions",
+            "required_fields",
+        )
+    }
+    update_payload["company_name"] = "변경된 세라믹랩"
+    updated = client.put("/api/v1/demands/D01", json=update_payload)
+    assert updated.status_code == 200
+
+    reread = client.get(f"/api/v1/cases/{GOLDEN_CASE_ID}")
+    assert reread.json()["match"]["candidates"][0]["company_name"] == original_company
+    decision = client.put(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/decision",
+        json={
+            "status": "APPROVED",
+            "selected_demand_id": "D01",
+            "reason": "변경된 수요처를 기존 Match 결과로 승인하지 않습니다.",
+        },
+    )
+    assert decision.status_code == 409
+    assert decision.json()["error"]["code"] == "DEMAND_CHANGED_SINCE_MATCH"
 
 
 def test_hold_flow_keeps_zero_as_a_deliberate_scenario_result(client) -> None:

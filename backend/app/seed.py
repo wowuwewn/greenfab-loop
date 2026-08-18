@@ -2,12 +2,53 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import UTC, datetime
+
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.enums import ResourceConfirmationStatus, SourceType, WorkflowStatus
-from app.models import AuditEvent, Case, Demand, ResourceConfirmation
+from app.models import (
+    AuditEvent,
+    Case,
+    Demand,
+    ResourceConfirmation,
+    RulePolicy,
+    RulePolicyVersion,
+)
+from app.services.demand import demand_content_sha256
 
 GOLDEN_CASE_ID = "SECOM-0116"
+MATCH_RULE_POLICY_KEY = "match-deterministic-v0"
+MATCH_RULE_POLICY_VERSION_ID = "RULEPOLICY-MATCH-DETERMINISTIC-V0-V1"
+MATCH_RULE_POLICY_DEFINITION = {
+    "evaluator": "demand-rules-v0.1",
+    "evaluated_conditions": [
+        "quantity_and_unit",
+        "required_fields",
+        "location",
+    ],
+    "interpretation": (
+        "This revision identifies the deterministic evaluator contract. "
+        "Demand-specific values remain in each immutable candidate snapshot."
+    ),
+    "rules": [],
+}
+
+
+def _match_rule_policy_sha256() -> str:
+    canonical = json.dumps(
+        MATCH_RULE_POLICY_DEFINITION,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+MATCH_RULE_POLICY_DEFINITION_SHA256 = _match_rule_policy_sha256()
 
 # These values are copied from the verified Detect artifact at
 # data/outputs/detect/dashboard_data.json.  They are model-output contributions,
@@ -67,9 +108,56 @@ DEMO_DEMANDS = (
 )
 
 
+def seed_system_data(session: Session) -> RulePolicy:
+    """Ensure non-demo system policy data exists in every environment.
+
+    The matching evaluator is reserved application data, not a demo fixture.
+    A hash mismatch is treated as deployment drift instead of silently
+    overwriting an auditable policy revision.
+    """
+
+    policy = session.get(RulePolicy, MATCH_RULE_POLICY_KEY)
+    if policy is None:
+        now = datetime.now(UTC)
+        policy = RulePolicy(
+            policy_key=MATCH_RULE_POLICY_KEY,
+            display_name="Deterministic demand rule evaluator",
+            description="Tracks the evaluator contract; it is not a safety or legal policy.",
+            active_version=1,
+        )
+        policy.versions.append(
+            RulePolicyVersion(
+                rule_policy_version_id=MATCH_RULE_POLICY_VERSION_ID,
+                version=1,
+                definition_json=MATCH_RULE_POLICY_DEFINITION,
+                definition_sha256=MATCH_RULE_POLICY_DEFINITION_SHA256,
+                created_by="system",
+                activated_at=now,
+                activated_by="system",
+            )
+        )
+        session.add(policy)
+        session.flush()
+        return policy
+
+    version = session.scalar(
+        select(RulePolicyVersion).where(
+            RulePolicyVersion.policy_key == MATCH_RULE_POLICY_KEY,
+            RulePolicyVersion.version == 1,
+        )
+    )
+    if version is None or version.definition_sha256 != MATCH_RULE_POLICY_DEFINITION_SHA256:
+        raise RuntimeError("Built-in Match rule policy is missing or has drifted")
+    if policy.active_version != 1:
+        policy.active_version = 1
+    session.flush()
+    return policy
+
+
 def seed_demo_data(session: Session) -> Case:
     """Insert the Golden Case and DEMO demands when they do not exist."""
 
+    seed_system_data(session)
     case = session.get(Case, GOLDEN_CASE_ID)
     if case is None:
         case = Case(
@@ -103,10 +191,14 @@ def seed_demo_data(session: Session) -> Case:
     for payload in DEMO_DEMANDS:
         demand = session.get(Demand, payload["demand_id"])
         if demand is None:
-            session.add(Demand(**payload, source_type=SourceType.DEMO))
+            demand = Demand(**payload, source_type=SourceType.DEMO, version=1)
+            session.add(demand)
         elif demand.source_type is SourceType.DEMO:
             for field_name, value in payload.items():
                 setattr(demand, field_name, value)
+            demand.version = 1
+        if demand is not None:
+            demand.content_sha256 = demand_content_sha256(demand)
 
     session.flush()
     return case

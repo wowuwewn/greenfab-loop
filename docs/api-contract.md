@@ -62,12 +62,17 @@
 | 409 | `RECEIPT_ALREADY_EXISTS` | 기존 Receipt와 다른 key로 다시 생성하려 함 |
 | 409 | `DEMAND_ALREADY_EXISTS` | 같은 `demand_id`가 이미 존재함 |
 | 409 | `DEMAND_INDEX_NOT_CONFIGURED` | 현재 Provider에는 vector index가 없음 |
+| 409 | `MATCH_IN_PROGRESS` | 같은 Case/key의 Match가 이미 inference 중 |
+| 409 | `PASSPORT_CHANGED_DURING_MATCH` | inference 중 Passport 변경, 재실행 필요 |
+| 409 | `DEMAND_CHANGED_DURING_MATCH` | inference 중 Demand 변경, 재동기화·재실행 필요 |
+| 409 | `CASE_CHANGED_DURING_MATCH` | inference 중 Decision 등 Case 단계 변경 |
+| 409 | `DEMAND_CHANGED_SINCE_MATCH` | Match 후 변경·비활성 Demand를 승인하려 함 |
 | 422 | `VALIDATION_ERROR` | Pydantic 필드·도메인 검증 실패 |
 | 413 | `EVIDENCE_TOO_LARGE` | Evidence upload 제한 초과 |
 | 503 | `MATCH_UNAVAILABLE` | 주입된 Match Provider 실행 실패 |
 | 503 | `DEMAND_INDEX_UNAVAILABLE` | PostgreSQL 저장 후 Chroma 동기화 실패 |
 | 503 | `DATABASE_UNAVAILABLE` | SQLAlchemy/PostgreSQL 요청 처리 실패 |
-| 500 | `INTEGRITY_ERROR`, `MATCH_DATA_ERROR` | 저장 관계 또는 DEMO Demand가 불완전함 |
+| 500 | `INTEGRITY_ERROR` | 저장 관계가 불완전함 |
 | 500 | `INTERNAL_ERROR` | 처리되지 않은 예외의 안전한 공통 응답 |
 
 FastAPI 기본 422도 위 형식으로 정규화합니다. API router는 401, 403, 404, 409, 413,
@@ -144,7 +149,7 @@ PostgreSQL Demand가 업무·Rule 데이터의 source of truth이며 ChromaDB는
 
 ### `GET /api/v1/demands?include_inactive=false`
 
-활성 Demand를 ID 순서로 반환합니다. `include_inactive=true`는 비활성 기록도 포함합니다.
+활성 Demand를 ID 순서로 반환합니다. `include_inactive=true`는 비활성 기록도 포함합니다. `VIEWER+`가 필요하며 응답에는 `version`, `content_sha256`가 포함됩니다.
 
 ### `POST /api/v1/demands`
 
@@ -177,7 +182,20 @@ PostgreSQL Demand가 업무·Rule 데이터의 source of truth이며 ChromaDB는
 
 활성 PostgreSQL Demand 전체를 upsert하고 DB에 없는 Chroma ID를 삭제합니다. Mock Provider에서는 `409 DEMAND_INDEX_NOT_CONFIGURED`입니다.
 
-Create/update/deactivate는 PostgreSQL transaction을 먼저 완료한 뒤 설정된 BGE index를 동기화합니다. Chroma만 실패하면 DB는 source of truth로 남고 `503 DEMAND_INDEX_UNAVAILABLE`가 반환되므로 전체 sync로 재조정할 수 있습니다. 인증이 없는 MVP 관리 API이므로 공개 배포 전에 RBAC가 필요합니다.
+### `GET /api/v1/demands/index/events`
+
+최근 index 작업의 `operation`, `status`, `requested_by`, `target_version`,
+`target_content_sha256`, `attempt_count`, 안전한 오류 유형을 반환합니다. 변경·sync·event 조회는
+`ADMIN`, 읽기는 `VIEWER+`이며 Demand 경로는 `X-Actor`를 무시하고 API principal actor만
+기록합니다.
+
+### `POST /api/v1/demands/index/events/{event_id}/retry`
+
+`FAILED` 또는 `SKIPPED` event를 현재 PostgreSQL Demand 상태 기준의 새 event로 재시도합니다.
+활성이면 `UPSERT`, 비활성이면 `DELETE`로 다시 결정합니다. 이미 성공했거나 실행 중인
+`PENDING` event는 `409`이며, crash로 남은 `PENDING` 복구에는 관리자 전체 sync를 사용합니다.
+
+Create/update/deactivate는 PostgreSQL transaction에서 `demand_index_events=PENDING`을 함께 저장한 뒤 commit 밖에서 BGE index를 동기화합니다. Chroma만 실패하면 DB는 source of truth로 남고 event는 `FAILED`, API는 `503 DEMAND_INDEX_UNAVAILABLE`가 됩니다. 복구는 event retry 또는 전체 sync이며 자동 retry/backoff worker는 후속 범위입니다.
 
 ## 7. Resource confirmation API
 
@@ -242,26 +260,34 @@ Headers: `Idempotency-Key`, Production `X-API-Key`, 명시적 Demo에서만 `X-A
 
 - `top_k`: 1–3, 기본 3
 - `PASSPORT_READY` 또는 Decision 전 `MATCH_READY`에서 실행합니다.
-- Match Run과 후보, deterministic Rule 결과를 같은 DB 트랜잭션으로 저장합니다.
+- 짧은 prepare transaction에서 PENDING MatchRun, Passport hash, active Rule policy revision을 고정합니다. BGE/Chroma inference는 DB transaction과 Case lock 밖에서 수행하고, persist transaction에서 Passport와 Demand snapshot을 다시 검증합니다.
 - 기본 Provider는 `MockMatchProvider`이며 BGE-M3로 사전 생성해 고정한 DEMO Top-3 snapshot을 반환합니다.
 - snapshot 점수는 현재 요청의 runtime 추론값이 아니며 모델명과 snapshot revision을 내부 Match Run에 함께 저장합니다.
 - 응답 `match.created_at`은 snapshot 생성시각이 아니라 현재 Match Run의 `completed_at`입니다.
 - Mock은 Golden R01 snapshot 전용입니다. Passport `description`에 `반도체`, `세정`, `무기질`이 모두 없으면 무관한 고정 점수를 표시하지 않고 `503 MATCH_UNAVAILABLE`를 반환합니다.
 - `MATCH_PROVIDER=bge_chroma`는 BAAI/bge-m3 dense embedding으로 Chroma Top-k ID를 찾습니다. 후보 회사·설명·Rule은 활성 PostgreSQL Demand에서 다시 읽습니다.
+- Candidate에는 당시 Demand 회사명·설명·Rule 입력·version/hash를 저장하며 이후 Demand 수정이 과거 envelope나 Receipt를 바꾸지 않습니다. Match 이후 변경·비활성화된 Demand는 기존 후보로 승인할 수 없고 재Match가 필요합니다.
+- 응답은 `model_revision`과 `rule_policy {policy_key, version, definition_sha256}` lineage를 포함합니다. Policy revision은 evaluator 계약 추적용이며 법규·안전 판정으로 확대 해석하지 않습니다.
 - Passport 또는 검색된 Demand 중 하나라도 `DEMO` 출처이면 Match Run도 `DEMO`로 저장합니다. 모든 입력이 `REAL`일 때만 `REAL`입니다.
 - document/query embedding은 normalize하며 cosine distance `d`를 `1 - d`로 변환한 값이 `semantic_similarity`입니다.
 - BGE/Chroma 실패 시 Mock snapshot으로 자동 전환하지 않습니다.
 
 Response `200`: 최신 Case envelope
-Errors: `409 INVALID_STATE`, `503 MATCH_UNAVAILABLE`, `500 MATCH_DATA_ERROR`
+Errors: `409 INVALID_STATE|MATCH_IN_PROGRESS|PASSPORT_CHANGED_DURING_MATCH|DEMAND_CHANGED_DURING_MATCH`, `503 MATCH_UNAVAILABLE`
 
 Golden Match 예시:
 
 ```json
 {
   "model": "Xenova/bge-m3",
+  "model_revision": "greenfab-loop-synthetic-v1@2026-08-16",
   "created_at": "2026-08-18T12:03:15+09:00",
   "source_type": "DEMO",
+  "rule_policy": {
+    "policy_key": "match-deterministic-v0",
+    "version": 1,
+    "definition_sha256": "..."
+  },
   "candidates": [
     {
       "demand_id": "D01",
@@ -427,6 +453,9 @@ CaseEnvelope를 확장하지 않는 별도 endpoint입니다. Rule catalog의 ac
 - Match·Receipt 중복 요청 처리
 - 모든 오류의 `trace_id`
 - Demand create/update/deactivate와 vector index upsert/delete fake integration
+- Demand RBAC, principal actor, durable index event 성공·실패 상태
+- Passport/Demand 경쟁 변경 시 FAILED MatchRun과 409
+- Candidate snapshot 불변성과 active Rule policy lineage
 - Provider readiness 실패 시 503이며 Mock fallback이 없는지 확인
 
 ## 15. 후속 TODO
@@ -434,5 +463,5 @@ CaseEnvelope를 확장하지 않는 별도 endpoint입니다. Rule catalog의 ac
 - SSO/OIDC, 조직·사업장 tenant와 DB-backed key lifecycle
 - 정렬 option과 cursor pagination
 - 범용 idempotency request hash·처리 상태 저장
-- Demand index sync outbox·재시도 worker와 관리 API RBAC
+- Demand index event 자동 재시도 worker와 운영 metrics
 - OpenAPI example·frontend client 자동 생성

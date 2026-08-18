@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.errors import register_exception_handlers
 from app.seed import seed_demo_data
+from app.services.demand import complete_index_event, create_index_event
 from app.services.match import DemandIndexManager, MatchProvider
 from app.services.runtime_match import build_match_provider
 from app.storage import EvidenceStorage, LocalEvidenceStorage
@@ -27,13 +28,41 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        if should_seed:
+        sync_event_id: str | None = None
+        if should_seed or (
+            settings.demand_index_sync_on_startup
+            and isinstance(configured_provider, DemandIndexManager)
+        ):
             with SessionLocal.begin() as session:
-                seed_demo_data(session)
+                if should_seed:
+                    seed_demo_data(session)
+                if settings.demand_index_sync_on_startup and isinstance(
+                    configured_provider, DemandIndexManager
+                ):
+                    sync_event_id = create_index_event(
+                        session,
+                        operation="SYNC_ALL",
+                        requested_by="system",
+                    ).event_id
         if settings.demand_index_sync_on_startup and isinstance(
             configured_provider, DemandIndexManager
         ):
-            configured_provider.sync_all_demands()
+            try:
+                configured_provider.sync_all_demands()
+            except Exception as exc:
+                if sync_event_id is not None:
+                    with SessionLocal.begin() as session:
+                        complete_index_event(
+                            session,
+                            sync_event_id,
+                            status="FAILED",
+                            error_message=type(exc).__name__,
+                        )
+                raise
+            else:
+                if sync_event_id is not None:
+                    with SessionLocal.begin() as session:
+                        complete_index_event(session, sync_event_id, status="SUCCEEDED")
         configured_provider.ready()
         yield
 

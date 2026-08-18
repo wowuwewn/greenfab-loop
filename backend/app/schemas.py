@@ -99,10 +99,18 @@ class MatchCandidateOut(ContractModel):
     status: MatchCandidateStatus
 
 
+class RulePolicyLineageOut(ContractModel):
+    policy_key: str
+    version: int
+    definition_sha256: str
+
+
 class MatchOut(ContractModel):
     model: str
+    model_revision: str | None
     created_at: datetime | None
     source_type: SourceType
+    rule_policy: RulePolicyLineageOut
     candidates: list[MatchCandidateOut]
 
 
@@ -339,6 +347,8 @@ class DemandOut(DemandPayload):
     demand_id: str
     source_type: SourceType
     is_active: bool
+    version: int
+    content_sha256: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -347,6 +357,21 @@ class DemandIndexSyncOut(ContractModel):
     provider: str
     upserted: int
     deleted: int
+
+
+class DemandIndexEventOut(ContractModel):
+    event_id: str
+    demand_id: str | None
+    operation: Literal["UPSERT", "DELETE", "SYNC_ALL"]
+    status: Literal["PENDING", "SUCCEEDED", "FAILED", "SKIPPED"]
+    requested_by: str
+    target_version: int | None
+    target_content_sha256: str | None
+    attempt_count: int
+    error_message: str | None
+    trace_id: str | None
+    created_at: datetime
+    processed_at: datetime | None
 
 
 class HealthOut(ContractModel):

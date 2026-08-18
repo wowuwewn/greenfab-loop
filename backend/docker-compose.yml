@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-greenfab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-greenfab}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - greenfab_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -45,6 +45,10 @@ services:
       BGE_MODEL_REVISION: ${BGE_MODEL_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
       BGE_DEVICE: ${BGE_DEVICE:-cpu}
       BGE_BATCH_SIZE: ${BGE_BATCH_SIZE:-4}
+      MATCH_MAX_CONCURRENCY: ${MATCH_MAX_CONCURRENCY:-1}
+      MATCH_QUEUE_TIMEOUT_SECONDS: ${MATCH_QUEUE_TIMEOUT_SECONDS:-30}
+      MATCH_PENDING_TIMEOUT_SECONDS: ${MATCH_PENDING_TIMEOUT_SECONDS:-120}
+      MATCH_RULE_POLICY_KEY: ${MATCH_RULE_POLICY_KEY:-match-deterministic-v0}
       CHROMA_MODE: ${CHROMA_MODE:-persistent}
       CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-greenfab_demands}
       CHROMA_PERSIST_DIRECTORY: ${CHROMA_PERSIST_DIRECTORY:-/app/.data/chroma}

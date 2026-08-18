@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any
 
 from app.config import Settings
@@ -20,6 +20,7 @@ from app.services.match import (
     DemandIndexDocument,
     IndexSyncResult,
     MatchCandidate,
+    MatchProviderError,
     MatchResult,
     MockMatchProvider,
     SemanticSearchHit,
@@ -92,16 +93,28 @@ class BgeM3ChromaAdapter:
         response = collection.query(
             query_embeddings=[self._encode([query])[0]],
             n_results=min(top_k, available),
-            include=["distances"],
+            include=["distances", "metadatas"],
         )
         ids = (response.get("ids") or [[]])[0]
         distances = (response.get("distances") or [[]])[0]
+        raw_metadatas = response.get("metadatas") or []
+        metadatas = raw_metadatas[0] if raw_metadatas else [None] * len(ids)
         return tuple(
             SemanticSearchHit(
                 demand_id=str(demand_id),
                 semantic_similarity=max(-1.0, min(1.0, 1.0 - float(distance))),
+                demand_version=(
+                    int(metadata["demand_version"])
+                    if metadata and metadata.get("demand_version") is not None
+                    else None
+                ),
+                demand_content_sha256=(
+                    str(metadata["demand_content_sha256"])
+                    if metadata and metadata.get("demand_content_sha256")
+                    else None
+                ),
             )
-            for demand_id, distance in zip(ids, distances, strict=True)
+            for demand_id, distance, metadata in zip(ids, distances, metadatas, strict=True)
         )
 
     def upsert(self, documents: Sequence[DemandIndexDocument]) -> int:
@@ -111,7 +124,20 @@ class BgeM3ChromaAdapter:
         self._get_collection().upsert(
             ids=[document.demand_id for document in documents],
             documents=texts,
-            metadatas=[{"demand_id": document.demand_id} for document in documents],
+            metadatas=[
+                {
+                    "demand_id": document.demand_id,
+                    **(
+                        {"demand_version": document.version} if document.version is not None else {}
+                    ),
+                    **(
+                        {"demand_content_sha256": document.content_sha256}
+                        if document.content_sha256
+                        else {}
+                    ),
+                }
+                for document in documents
+            ],
             embeddings=self._encode(texts),
         )
         return len(documents)
@@ -159,23 +185,36 @@ class BgeM3ChromaAdapter:
     def _get_collection(self) -> Any:
         if self._collection is None:
             client = self._get_client()
+            expected_metadata = {
+                "hnsw:space": "cosine",
+                "embedding_model": self.model_name,
+                "embedding_revision": self.model_revision,
+            }
             collection = client.get_or_create_collection(
                 name=self.collection_name,
-                metadata={
-                    "hnsw:space": "cosine",
-                    "embedding_model": self.model_name,
-                    "embedding_revision": self.model_revision,
-                },
+                metadata=expected_metadata,
             )
             metadata = getattr(collection, "metadata", None) or {}
             indexed_model = metadata.get("embedding_model")
             indexed_revision = metadata.get("embedding_revision")
-            if collection.count() > 0 and (
-                indexed_model != self.model_name or indexed_revision != self.model_revision
-            ):
+            metadata_mismatch = indexed_model not in {
+                None,
+                self.model_name,
+            } or indexed_revision not in {None, self.model_revision}
+            collection_count = collection.count()
+            metadata_missing = indexed_model is None or indexed_revision is None
+            if metadata_mismatch or (collection_count > 0 and metadata_missing):
                 raise RuntimeError(
-                    "Non-empty Chroma collection embedding model or revision does not match "
-                    "the configured BGE runtime"
+                    "Chroma collection embedding model or revision does not match the "
+                    "configured BGE runtime"
+                )
+            if collection_count == 0 and metadata_missing:
+                # Recreating an empty legacy collection is safe and guarantees
+                # cosine is the actual HNSW distance, not just a metadata label.
+                client.delete_collection(name=self.collection_name)
+                collection = client.get_or_create_collection(
+                    name=self.collection_name,
+                    metadata=expected_metadata,
                 )
             self._collection = collection
         return self._collection
@@ -225,23 +264,54 @@ class BgeChromaMatchProvider:
         self,
         adapter: BgeM3ChromaAdapter,
         catalog: SqlAlchemyDemandCatalog,
+        *,
+        max_concurrency: int = 1,
+        queue_timeout_seconds: int = 30,
     ) -> None:
         self.adapter = adapter
         self.catalog = catalog
         self.model_name = adapter.model_name
         self.snapshot_id = adapter.snapshot_id
+        self._inference_slots = BoundedSemaphore(max_concurrency)
+        self._queue_timeout_seconds = queue_timeout_seconds
+        # The embedding model and local Chroma collection are process-local
+        # shared state. Serialize reads/writes so index reconciliation cannot
+        # race inference or another mutation in this process.
+        self._runtime_lock = Lock()
 
     def ready(self) -> None:
         self.adapter.ready()
 
     def match(self, passport: ResourcePassportInput, *, top_k: int = 3) -> MatchResult:
+        if not self._inference_slots.acquire(timeout=self._queue_timeout_seconds):
+            raise MatchProviderError("Match inference capacity is temporarily exhausted")
+        try:
+            with self._runtime_lock:
+                return self._match(passport, top_k=top_k)
+        except MatchProviderError:
+            raise
+        except Exception as exc:
+            raise MatchProviderError("BGE/Chroma Match provider failed") from exc
+        finally:
+            self._inference_slots.release()
+
+    def _match(self, passport: ResourcePassportInput, *, top_k: int) -> MatchResult:
         query_text = build_passport_search_text(passport)
-        hits = self.adapter.search(query_text, top_k=top_k)
+        # Overfetch protects Top-k from stale/inactive vector IDs. PostgreSQL
+        # remains authoritative and the hydrated active rows are sliced below.
+        hits = self.adapter.search(query_text, top_k=top_k * 3)
         demand_map = self.catalog.load_active([hit.demand_id for hit in hits])
         candidates: list[MatchCandidate] = []
         for hit in hits:
             demand = demand_map.get(hit.demand_id)
             if demand is None:
+                continue
+            if (
+                hit.demand_version is None
+                or hit.demand_content_sha256 is None
+                or hit.demand_version != demand.version
+                or hit.demand_content_sha256 != demand.content_sha256
+            ):
                 continue
             candidates.append(
                 MatchCandidate(
@@ -251,10 +321,14 @@ class BgeChromaMatchProvider:
                     demand_description=demand.demand_description,
                     semantic_similarity=hit.semantic_similarity,
                     rule_check=evaluate_rules(passport, demand.rules),
+                    demand_rules=demand.rules,
+                    source_type=demand.source_type,
+                    demand_version=demand.version,
+                    demand_content_sha256=demand.content_sha256,
                 )
             )
-        if not candidates:
-            raise ValueError("No active PostgreSQL Demand matched the Chroma results")
+            if len(candidates) == top_k:
+                break
         if passport.source_type not in {"REAL", "DEMO"}:
             raise ValueError("Passport source_type must be REAL or DEMO")
         source_type = (
@@ -272,23 +346,31 @@ class BgeChromaMatchProvider:
         )
 
     def sync_all_demands(self) -> IndexSyncResult:
-        documents = self.catalog.list_active_documents()
-        desired_ids = {document.demand_id for document in documents}
-        stale_ids = self.adapter.list_ids() - desired_ids
-        return IndexSyncResult(
-            upserted=self.adapter.upsert(documents),
-            deleted=self.adapter.delete(sorted(stale_ids)),
-        )
+        with self._runtime_lock:
+            documents = self.catalog.list_active_documents()
+            desired_ids = {document.demand_id for document in documents}
+            stale_ids = self.adapter.list_ids() - desired_ids
+            return IndexSyncResult(
+                upserted=self.adapter.upsert(documents),
+                deleted=self.adapter.delete(sorted(stale_ids)),
+            )
 
     def upsert_demand(self, demand_id: str) -> None:
+        with self._runtime_lock:
+            self._reconcile_demand(demand_id)
+
+    def delete_demand(self, demand_id: str) -> None:
+        # Re-read PostgreSQL instead of blindly applying an old DELETE event.
+        # Delayed mutation attempts therefore converge to the latest state.
+        with self._runtime_lock:
+            self._reconcile_demand(demand_id)
+
+    def _reconcile_demand(self, demand_id: str) -> None:
         document = self.catalog.load_active_document(demand_id)
         if document is None:
             self.adapter.delete([demand_id])
         else:
             self.adapter.upsert([document])
-
-    def delete_demand(self, demand_id: str) -> None:
-        self.adapter.delete([demand_id])
 
 
 def build_passport_search_text(passport: ResourcePassportInput) -> str:
@@ -322,5 +404,10 @@ def build_match_provider(
             ssl=settings.chroma_ssl,
             headers=settings.chroma_headers,
         )
-        return BgeChromaMatchProvider(adapter, SqlAlchemyDemandCatalog(session_factory))
+        return BgeChromaMatchProvider(
+            adapter,
+            SqlAlchemyDemandCatalog(session_factory),
+            max_concurrency=settings.match_max_concurrency,
+            queue_timeout_seconds=settings.match_queue_timeout_seconds,
+        )
     raise RuntimeError(f"Unsupported MATCH_PROVIDER: {settings.match_provider}")

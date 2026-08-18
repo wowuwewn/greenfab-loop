@@ -23,6 +23,10 @@ from typing import Literal, Protocol, runtime_checkable
 from .rules import DemandRules, ResourcePassportInput, RuleCheck, evaluate_rules
 
 
+class MatchProviderError(RuntimeError):
+    """Safe boundary error raised by Match infrastructure adapters."""
+
+
 @dataclass(frozen=True, slots=True)
 class DemandSnapshot:
     """A demand returned by semantic retrieval plus its deterministic rules."""
@@ -33,6 +37,8 @@ class DemandSnapshot:
     semantic_similarity: float
     rules: DemandRules
     source_type: Literal["REAL", "DEMO"] = "DEMO"
+    version: int | None = None
+    content_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +47,8 @@ class SemanticSearchHit:
 
     demand_id: str
     semantic_similarity: float
+    demand_version: int | None = None
+    demand_content_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +57,8 @@ class DemandIndexDocument:
 
     demand_id: str
     searchable_text: str
+    version: int | None = None
+    content_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +75,10 @@ class MatchCandidate:
     demand_description: str
     semantic_similarity: float
     rule_check: RuleCheck
+    demand_rules: DemandRules
+    source_type: Literal["REAL", "DEMO"] = "DEMO"
+    demand_version: int | None = None
+    demand_content_sha256: str | None = None
 
     @property
     def status(self) -> str:
@@ -179,6 +193,8 @@ _DEMO_TOP3: tuple[DemandSnapshot, ...] = (
             unit="kg",
             required_fields=("description", "quantity", "unit", "composition"),
         ),
+        version=1,
+        content_sha256="d8d7f4796d17da7b44f549ab8b5a9d8d0d4d3a2766474f938033cf0ce7dedf64",
     ),
     DemandSnapshot(
         demand_id="D15",
@@ -191,6 +207,8 @@ _DEMO_TOP3: tuple[DemandSnapshot, ...] = (
         rules=DemandRules(
             required_fields=("description", "composition", "condition"),
         ),
+        version=1,
+        content_sha256="72eeef919ca8441ce4d7a8362c75dc0877c4e4f3612ca94b867cee1b6f5c8764",
     ),
     DemandSnapshot(
         demand_id="D11",
@@ -202,6 +220,8 @@ _DEMO_TOP3: tuple[DemandSnapshot, ...] = (
         rules=DemandRules(
             required_fields=("description", "composition", "condition"),
         ),
+        version=1,
+        content_sha256="ed1a90b049cf55b016e9b96ab01f3877dfa3bf87001d57b99e493ee33dc0957c",
     ),
 )
 
@@ -235,6 +255,10 @@ class MockMatchProvider:
                 demand_description=demand.demand_description,
                 semantic_similarity=demand.semantic_similarity,
                 rule_check=evaluate_rules(passport, demand.rules),
+                demand_rules=demand.rules,
+                source_type=demand.source_type,
+                demand_version=demand.version,
+                demand_content_sha256=demand.content_sha256,
             )
             for rank, demand in enumerate(_DEMO_TOP3[:top_k], start=1)
         )

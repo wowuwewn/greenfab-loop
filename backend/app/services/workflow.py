@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from math import isfinite
 from typing import Any
 from uuid import uuid4
 
@@ -47,12 +51,31 @@ from app.schemas import (
     ResourcePassportOut,
     ResourcePassportRequest,
     RuleCheckOut,
+    RulePolicyLineageOut,
     ShapFeature,
 )
-from app.services.match import MatchProvider
-from app.services.rules import ResourcePassportInput
+from app.services.demand import demand_content_sha256, demand_snapshot_payload
+from app.services.match import MatchProvider, MatchResult
+from app.services.rule_catalog import get_active_rule_policy_snapshot
+from app.services.rules import DemandRules, ResourcePassportInput, evaluate_rules
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedMatch:
+    match_run_id: str
+    passport_input: ResourcePassportInput
+    passport_snapshot_sha256: str
+    workflow_status: WorkflowStatus
+    execution_token: str
+    already_completed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MatchCompletion:
+    record: Case
+    error: DomainError | None = None
 
 
 def utcnow() -> datetime:
@@ -147,13 +170,25 @@ def build_case_envelope(session: Session, record: Case) -> CaseEnvelope:
     if match_run is not None:
         match_output = MatchOut(
             model=match_run.model,
+            model_revision=match_run.model_revision,
             created_at=match_run.completed_at or match_run.created_at,
             source_type=match_run.source_type,
+            rule_policy=RulePolicyLineageOut(
+                policy_key=match_run.rule_policy_key,
+                version=match_run.rule_policy_version,
+                definition_sha256=match_run.rule_policy_definition_sha256,
+            ),
             candidates=[
                 MatchCandidateOut(
                     demand_id=candidate.demand_id,
-                    company_name=candidate.demand.company_name,
-                    demand_description=candidate.demand.demand_description,
+                    company_name=(
+                        candidate.demand_snapshot_json.get("company_name")
+                        or candidate.demand.company_name
+                    ),
+                    demand_description=(
+                        candidate.demand_snapshot_json.get("demand_description")
+                        or candidate.demand.demand_description
+                    ),
                     semantic_similarity=candidate.semantic_similarity,
                     rule_check=RuleCheckOut.model_validate(candidate.rule_check),
                     status=candidate.status,
@@ -320,26 +355,24 @@ def save_passport(
     return record
 
 
-def run_match(
+def prepare_match(
     session: Session,
     case_id: str,
     provider: MatchProvider,
     *,
     top_k: int,
     idempotency_key: str | None = None,
-    actor: str = "demo_operator",
-    trace_id: str | None = None,
-) -> Case:
+    rule_policy_key: str,
+    pending_timeout_seconds: int = 120,
+) -> PreparedMatch:
+    """Reserve a MatchRun and snapshot inputs in a short DB transaction."""
+
     record = get_case_for_update(session, case_id)
-    _require_status(
-        record,
-        {WorkflowStatus.PASSPORT_READY, WorkflowStatus.MATCH_READY},
-        "Passport 저장 후에만 Match를 실행할 수 있습니다.",
-    )
     passport = record.resource_passport
     if passport is None:
         raise DomainError("INVALID_STATE", "저장된 Passport가 없습니다.", 409)
 
+    existing: MatchRun | None = None
     if idempotency_key:
         existing = session.scalar(
             select(MatchRun).where(
@@ -348,70 +381,280 @@ def run_match(
             )
         )
         if existing is not None:
-            return record
+            if existing.top_k != top_k:
+                raise DomainError(
+                    "IDEMPOTENCY_KEY_REUSED",
+                    "같은 Idempotency-Key를 다른 Match 요청에 재사용할 수 없습니다.",
+                    409,
+                )
+            if existing.status is MatchRunStatus.COMPLETED:
+                latest_completed_id = session.scalar(
+                    select(MatchRun.match_run_id)
+                    .where(
+                        MatchRun.case_id == case_id,
+                        MatchRun.status == MatchRunStatus.COMPLETED,
+                    )
+                    .order_by(
+                        nullslast(MatchRun.completed_at.desc()),
+                        MatchRun.created_at.desc(),
+                        MatchRun.match_run_id.desc(),
+                    )
+                    .limit(1)
+                )
+                if latest_completed_id != existing.match_run_id:
+                    raise DomainError(
+                        "IDEMPOTENCY_KEY_STALE",
+                        "이 Idempotency-Key보다 최신 Match가 있어 "
+                        "과거 응답을 현재 Case로 반환할 수 없습니다.",
+                        409,
+                    )
+                return PreparedMatch(
+                    match_run_id=existing.match_run_id,
+                    passport_input=_passport_input(passport),
+                    passport_snapshot_sha256=existing.passport_snapshot_sha256,
+                    workflow_status=record.workflow_status,
+                    execution_token=existing.execution_token,
+                    already_completed=True,
+                )
+            if existing.status is MatchRunStatus.PENDING:
+                created_at = existing.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                if (utcnow() - created_at).total_seconds() < pending_timeout_seconds:
+                    raise DomainError(
+                        "MATCH_IN_PROGRESS",
+                        "같은 Idempotency-Key의 Match가 이미 진행 중입니다.",
+                        409,
+                    )
 
-    passport_input = ResourcePassportInput(
-        passport_id=passport.passport_id,
-        description=passport.description,
-        quantity=_number(passport.quantity),
-        unit=passport.unit,
-        condition=passport.condition,
-        location=passport.location,
-        composition=passport.composition,
-        source_type=passport.source_type.value,
+    _require_status(
+        record,
+        {WorkflowStatus.PASSPORT_READY, WorkflowStatus.MATCH_READY},
+        "Passport 저장 후에만 Match를 실행할 수 있습니다.",
     )
-    try:
-        result = provider.match(passport_input, top_k=top_k)
-    except (RuntimeError, ValueError) as exc:
-        logger.error(
-            "Match provider failed case_id=%s error_type=%s",
-            case_id,
-            type(exc).__name__,
+
+    passport_input = _passport_input(passport)
+    passport_snapshot = _passport_snapshot(passport_input)
+    passport_hash = _sha256_json(passport_snapshot)
+    policy = get_active_rule_policy_snapshot(session, rule_policy_key)
+    provider_model = str(getattr(provider, "model_name", provider.__class__.__name__))
+    provider_revision = str(getattr(provider, "snapshot_id", "unversioned"))
+    execution_token = uuid4().hex
+
+    if existing is None:
+        match_run = MatchRun(
+            case_id=case_id,
+            passport_id=passport.passport_id,
+            model=provider_model,
+            model_revision=provider_revision,
+            top_k=top_k,
+            status=MatchRunStatus.PENDING,
+            source_type=passport.source_type,
+            idempotency_key=idempotency_key,
+            execution_token=execution_token,
+            passport_snapshot_json=passport_snapshot,
+            passport_snapshot_sha256=passport_hash,
+            rule_policy_key=policy.policy_key,
+            rule_policy_version=policy.version,
+            rule_policy_definition_sha256=policy.definition_sha256,
         )
-        raise DomainError(
-            "MATCH_UNAVAILABLE",
-            "Match 서비스를 일시적으로 사용할 수 없습니다.",
-            503,
-        ) from exc
-
-    before = record.workflow_status
-    completed_at = utcnow()
-    match_run = MatchRun(
-        case_id=case_id,
-        passport_id=passport.passport_id,
-        model=result.model,
-        model_revision=result.snapshot_id,
-        top_k=top_k,
-        status=MatchRunStatus.COMPLETED,
-        source_type=SourceType(result.source_type),
-        idempotency_key=idempotency_key,
-        completed_at=completed_at,
-    )
-    session.add(match_run)
+        session.add(match_run)
+    else:
+        match_run = existing
+        match_run.model = provider_model
+        match_run.model_revision = provider_revision
+        match_run.top_k = top_k
+        match_run.status = MatchRunStatus.PENDING
+        match_run.source_type = passport.source_type
+        match_run.completed_at = None
+        match_run.error_message = None
+        match_run.execution_token = execution_token
+        match_run.created_at = utcnow()
+        match_run.passport_snapshot_json = passport_snapshot
+        match_run.passport_snapshot_sha256 = passport_hash
+        match_run.rule_policy_key = policy.policy_key
+        match_run.rule_policy_version = policy.version
+        match_run.rule_policy_definition_sha256 = policy.definition_sha256
     session.flush()
+    return PreparedMatch(
+        match_run_id=match_run.match_run_id,
+        passport_input=passport_input,
+        passport_snapshot_sha256=passport_hash,
+        workflow_status=record.workflow_status,
+        execution_token=execution_token,
+    )
+
+
+def fail_match(
+    session: Session,
+    match_run_id: str,
+    *,
+    error_code: str,
+    execution_token: str | None = None,
+) -> None:
+    """Persist a safe failure marker without retaining provider internals."""
+
+    match_run = session.scalar(
+        select(MatchRun).where(MatchRun.match_run_id == match_run_id).with_for_update()
+    )
+    if (
+        match_run is None
+        or match_run.status is MatchRunStatus.COMPLETED
+        or (execution_token is not None and match_run.execution_token != execution_token)
+    ):
+        return
+    match_run.status = MatchRunStatus.FAILED
+    match_run.completed_at = utcnow()
+    match_run.error_message = error_code
+    session.flush()
+
+
+def complete_match(
+    session: Session,
+    case_id: str,
+    prepared: PreparedMatch,
+    result: MatchResult,
+    *,
+    actor: str,
+    trace_id: str | None = None,
+) -> MatchCompletion:
+    """Persist provider output after verifying immutable input snapshots."""
+
+    record = get_case_for_update(session, case_id)
+    match_run = session.scalar(
+        select(MatchRun).where(MatchRun.match_run_id == prepared.match_run_id).with_for_update()
+    )
+    if match_run is None:
+        raise DomainError("MATCH_RUN_NOT_FOUND", "예약된 MatchRun이 없습니다.", 409)
+    if match_run.status is MatchRunStatus.COMPLETED:
+        return MatchCompletion(record)
+    if match_run.status is not MatchRunStatus.PENDING:
+        raise DomainError("MATCH_NOT_PENDING", "MatchRun이 완료 가능한 상태가 아닙니다.", 409)
+    if match_run.execution_token != prepared.execution_token:
+        raise DomainError(
+            "MATCH_ATTEMPT_SUPERSEDED",
+            "이 Match 시도는 더 최신 재시도로 대체되었습니다.",
+            409,
+        )
+
+    if record.workflow_status is not prepared.workflow_status:
+        fail_match(
+            session,
+            match_run.match_run_id,
+            error_code="CASE_CHANGED",
+            execution_token=prepared.execution_token,
+        )
+        return MatchCompletion(
+            record,
+            DomainError(
+                "CASE_CHANGED_DURING_MATCH",
+                "Match 실행 중 Case 단계가 변경되었습니다. 현재 상태에서 다시 확인해 주세요.",
+                409,
+            ),
+        )
+
+    passport = record.resource_passport
+    current_hash = (
+        _sha256_json(_passport_snapshot(_passport_input(passport)))
+        if passport is not None
+        else None
+    )
+    if current_hash != prepared.passport_snapshot_sha256:
+        fail_match(
+            session,
+            match_run.match_run_id,
+            error_code="PASSPORT_CHANGED",
+            execution_token=prepared.execution_token,
+        )
+        return MatchCompletion(
+            record,
+            DomainError(
+                "PASSPORT_CHANGED_DURING_MATCH",
+                "Match 실행 중 Passport가 변경되었습니다. 다시 실행해 주세요.",
+                409,
+            ),
+        )
+
+    if not _valid_provider_candidates(result, match_run.top_k):
+        fail_match(
+            session,
+            match_run.match_run_id,
+            error_code="PROVIDER_RESULT_INVALID",
+            execution_token=prepared.execution_token,
+        )
+        return MatchCompletion(
+            record,
+            DomainError(
+                "MATCH_UNAVAILABLE",
+                "Match Provider가 유효한 후보 형식을 반환하지 않았습니다.",
+                503,
+            ),
+        )
 
     demand_ids = {candidate.demand_id for candidate in result.candidates}
     demands = {
         demand.demand_id: demand
-        for demand in session.scalars(select(Demand).where(Demand.demand_id.in_(demand_ids))).all()
+        for demand in session.scalars(
+            select(Demand)
+            .where(Demand.demand_id.in_(demand_ids))
+            .order_by(Demand.demand_id.asc())
+            .with_for_update()
+        ).all()
     }
     missing_demands = demand_ids - demands.keys()
-    if missing_demands:
-        raise DomainError(
-            "MATCH_DATA_ERROR",
-            f"Demand seed가 없습니다: {', '.join(sorted(missing_demands))}",
-            500,
+    changed_demands = {
+        candidate.demand_id
+        for candidate in result.candidates
+        if candidate.demand_id in demands
+        and not _candidate_matches_current_demand(candidate, demands[candidate.demand_id])
+    }
+    if missing_demands or changed_demands:
+        fail_match(
+            session,
+            match_run.match_run_id,
+            error_code="DEMAND_CHANGED",
+            execution_token=prepared.execution_token,
+        )
+        return MatchCompletion(
+            record,
+            DomainError(
+                "DEMAND_CHANGED_DURING_MATCH",
+                "Match 실행 중 Demand가 변경되었습니다. 인덱스 동기화 후 다시 실행해 주세요.",
+                409,
+            ),
         )
 
+    before = record.workflow_status
+    match_run.model = result.model
+    match_run.model_revision = result.snapshot_id
+    match_run.source_type = (
+        SourceType.DEMO
+        if prepared.passport_input.source_type == SourceType.DEMO.value
+        or any(demand.source_type is SourceType.DEMO for demand in demands.values())
+        else SourceType.REAL
+    )
+    match_run.status = MatchRunStatus.COMPLETED
+    match_run.completed_at = utcnow()
+    match_run.error_message = None
+
     for candidate in result.candidates:
+        demand = demands[candidate.demand_id]
+        verified_rule_check = evaluate_rules(
+            prepared.passport_input,
+            _demand_rules(demand),
+        )
+        snapshot = demand_snapshot_payload(demand)
+        snapshot["content_sha256"] = demand.content_sha256 or demand_content_sha256(demand)
+        snapshot["rule_check"] = verified_rule_check.as_dict()
         session.add(
             MatchCandidate(
                 match_run_id=match_run.match_run_id,
                 demand_id=candidate.demand_id,
                 rank=candidate.rank,
                 semantic_similarity=candidate.semantic_similarity,
-                rule_check=candidate.rule_check.as_dict(),
-                status=MatchCandidateStatus(candidate.status),
+                rule_check=verified_rule_check.as_dict(),
+                demand_snapshot_json=snapshot,
+                status=MatchCandidateStatus(verified_rule_check.status),
             )
         )
 
@@ -426,12 +669,94 @@ def run_match(
             "match_run_id": match_run.match_run_id,
             "model": result.model,
             "snapshot_id": result.snapshot_id,
-            "top_k": top_k,
+            "top_k": match_run.top_k,
+            "rule_policy": {
+                "policy_key": match_run.rule_policy_key,
+                "version": match_run.rule_policy_version,
+                "definition_sha256": match_run.rule_policy_definition_sha256,
+            },
+            "passport_snapshot_sha256": match_run.passport_snapshot_sha256,
         },
         trace_id=trace_id,
     )
     session.flush()
-    return record
+    return MatchCompletion(record)
+
+
+def _passport_input(passport: ResourcePassport | None) -> ResourcePassportInput:
+    if passport is None:
+        raise DomainError("INVALID_STATE", "저장된 Passport가 없습니다.", 409)
+    return ResourcePassportInput(
+        passport_id=passport.passport_id,
+        description=passport.description,
+        quantity=_number(passport.quantity),
+        unit=passport.unit,
+        condition=passport.condition,
+        location=passport.location,
+        composition=passport.composition,
+        source_type=passport.source_type.value,
+    )
+
+
+def _passport_snapshot(passport: ResourcePassportInput) -> dict[str, Any]:
+    return {
+        "passport_id": passport.passport_id,
+        "description": passport.description,
+        "quantity": passport.quantity,
+        "unit": passport.unit,
+        "condition": passport.condition,
+        "location": passport.location,
+        "composition": passport.composition,
+        "source_type": passport.source_type,
+    }
+
+
+def _sha256_json(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _candidate_matches_current_demand(candidate: Any, demand: Demand) -> bool:
+    if not demand.is_active:
+        return False
+    current_hash = demand.content_sha256 or demand_content_sha256(demand)
+    current_rules = _demand_rules(demand)
+    return (
+        candidate.company_name == demand.company_name
+        and candidate.demand_description == demand.demand_description
+        and candidate.source_type == demand.source_type.value
+        and candidate.demand_rules == current_rules
+        and candidate.demand_version == demand.version
+        and candidate.demand_content_sha256 == current_hash
+    )
+
+
+def _demand_rules(demand: Demand) -> DemandRules:
+    return DemandRules(
+        quantity_min=_number(demand.quantity_min),
+        quantity_max=_number(demand.quantity_max),
+        unit=demand.unit,
+        accepted_locations=(demand.location,) if demand.location else (),
+        required_fields=tuple(demand.required_fields),
+    )
+
+
+def _valid_provider_candidates(result: MatchResult, top_k: int) -> bool:
+    candidates = result.candidates
+    if len(candidates) > top_k:
+        return False
+    if [candidate.rank for candidate in candidates] != list(range(1, len(candidates) + 1)):
+        return False
+    if len({candidate.demand_id for candidate in candidates}) != len(candidates):
+        return False
+    try:
+        return all(
+            isfinite(float(candidate.semantic_similarity))
+            and -1.0 <= float(candidate.semantic_similarity) <= 1.0
+            for candidate in candidates
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def save_decision(
@@ -474,6 +799,28 @@ def save_decision(
             raise DomainError(
                 "CANDIDATE_NOT_REVIEWABLE",
                 "APPROVED는 REVIEW 상태 후보에만 기록할 수 있습니다.",
+                409,
+            )
+        selected_demand = session.scalar(
+            select(Demand).where(Demand.demand_id == selected.demand_id).with_for_update()
+        )
+        snapshot = selected.demand_snapshot_json
+        snapshot_version = snapshot.get("version")
+        snapshot_hash = snapshot.get("content_sha256")
+        current_hash = (
+            selected_demand.content_sha256 or demand_content_sha256(selected_demand)
+            if selected_demand is not None
+            else None
+        )
+        if (
+            selected_demand is None
+            or not selected_demand.is_active
+            or snapshot_version != selected_demand.version
+            or snapshot_hash != current_hash
+        ):
+            raise DomainError(
+                "DEMAND_CHANGED_SINCE_MATCH",
+                "선택한 Demand가 Match 이후 변경되었습니다. 다시 Match해 주세요.",
                 409,
             )
 

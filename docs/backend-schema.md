@@ -148,6 +148,8 @@ Demand는 Rule과 ChromaDB 인덱싱의 관계형 원본입니다.
 | `required_fields` | `JSONB` | Passport 필드명 array, 기본 `[]` |
 | `source_type` | `VARCHAR` | `REAL`, `DEMO`; Golden fixture는 DEMO |
 | `is_active` | `BOOLEAN` | 기본 true; false이면 검색 index에서 제외 |
+| `version` | `INTEGER` | 변경·비활성화 시 증가하는 optimistic lineage version |
+| `content_sha256` | `VARCHAR(64)` | 검색·표시·Rule 입력의 canonical hash |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | 서버 생성 |
 
 Rule Service는 수량, 단위, 필수 필드와 위치를 결정론적으로 평가합니다. BGE Provider가 DB `location`을 Rule의 허용 위치로 변환합니다. `accepted_conditions`는 검색 문서에는 포함하지만 아직 hard Rule로 자동 판정하지 않습니다.
@@ -157,7 +159,7 @@ Rule Service는 수량, 단위, 필수 필드와 위치를 결정론적으로 �
 `rule_policies`는 `policy_key`, 표시 metadata, `active_version`을 보관합니다.
 `rule_policy_versions`는 `(policy_key, version)` UNIQUE, immutable `definition_json`, canonical
 `definition_sha256`, 생성·활성화 actor/time을 저장합니다. Catalog API는 version과 activation을
-관리하지만 현재 Match/Rule 실행 row는 아직 `rule_policy_version_id`를 참조하지 않습니다.
+관리합니다. MatchRun은 실행 시점의 `policy_key`, `version`, `definition_sha256`를 값으로 고정합니다. 이는 evaluator 계약 lineage이며 Candidate의 Demand별 실제 조건 snapshot과 구분합니다.
 
 ### `match_runs`
 
@@ -174,8 +176,13 @@ Rule Service는 수량, 단위, 필수 필드와 위치를 결정론적으로 �
 | `idempotency_key` | `VARCHAR(255)` | null 가능, Case 범위 중복 방지 |
 | `created_at`, `completed_at` | `TIMESTAMPTZ` | DB 생성·실행 완료 시각 |
 | `error_message` | `TEXT` | 실패 정보, null 가능 |
+| `execution_token` | `VARCHAR(64)` | lease 재시도 간 오래된 inference 완료를 차단하는 attempt token |
+| `passport_snapshot_json` | `JSONB` | inference 전 Passport 입력 snapshot |
+| `passport_snapshot_sha256` | `VARCHAR(64)` | persist 시 변경 감지용 hash |
+| `rule_policy_key`, `rule_policy_version` | `VARCHAR`, `INTEGER` | 실행 시 active policy revision |
+| `rule_policy_definition_sha256` | `VARCHAR(64)` | immutable policy definition hash |
 
-최신 `COMPLETED` run은 `completed_at DESC NULLS LAST`, `created_at DESC`, `match_run_id DESC` 순서로 선택합니다. 외부 `match.created_at`은 고정 snapshot 생성시각이 아니라 `completed_at`이며, 예외적으로 완료시각이 없을 때만 DB `created_at`을 사용합니다. Match key는 선택적이고 `(case_id, idempotency_key)`가 Unique이므로 다른 Case는 같은 key 문자열을 사용할 수 있습니다. 현재 request body hash는 저장하지 않습니다.
+최신 `COMPLETED` run은 `completed_at DESC NULLS LAST`, `created_at DESC`, `match_run_id DESC` 순서로 선택합니다. 외부 `match.created_at`은 고정 snapshot 생성시각이 아니라 `completed_at`이며, 예외적으로 완료시각이 없을 때만 DB `created_at`을 사용합니다. Match key는 선택적이고 `(case_id, idempotency_key)`가 Unique이므로 다른 Case는 같은 key 문자열을 사용할 수 있습니다. 같은 key의 진행 중 lease가 `MATCH_PENDING_TIMEOUT_SECONDS`를 넘으면 같은 row를 새 `execution_token`으로 재사용하며, 이전 inference는 persist할 수 없습니다. 최신 run보다 오래된 완료 key는 현재 envelope를 잘못 반환하지 않고 `409 IDEMPOTENCY_KEY_STALE`입니다.
 
 ### `match_candidates`
 
@@ -187,6 +194,7 @@ Rule Service는 수량, 단위, 필수 필드와 위치를 결정론적으로 �
 | `rank` | `INTEGER` | 1 이상 |
 | `semantic_similarity` | `DOUBLE PRECISION` | null 또는 -1~1 |
 | `rule_check` | `JSONB` | Data Contract의 tri-state 객체 |
+| `demand_snapshot_json` | `JSONB` | 당시 회사·설명·Rule 입력·source/version/hash |
 | `status` | `VARCHAR` | `REVIEW`, `NEEDS_INFO`, `RULE_FAIL` |
 | `created_at` | `TIMESTAMPTZ` | 서버 생성 |
 
@@ -209,7 +217,11 @@ Unique:
 | `decided_at` | `TIMESTAMPTZ` | 필수 |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | 서버 생성 |
 
-`APPROVED`는 `selected_demand_id`와 `selected_match_candidate_id`를 모두 요구합니다. Workflow Service가 최신 Match 후보를 찾은 뒤 두 값을 함께 저장하므로, Demand뿐 아니라 실제 검토한 후보 row까지 추적할 수 있습니다. 현재는 최신 후보 중 `REVIEW`만 승인할 수 있습니다. `reason`, `decided_by`는 API에서 strip되고 DB에서도 trim 후 빈 문자열을 거부합니다.
+`APPROVED`는 `selected_demand_id`와 `selected_match_candidate_id`를 모두 요구합니다. Workflow Service가 최신 Match 후보를 찾은 뒤 두 값을 함께 저장합니다. 최신 후보 중 `REVIEW`이면서 현재 Demand가 활성이고 snapshot과 version/hash가 같은 경우만 승인할 수 있습니다. 과거 envelope와 Receipt 표시는 현재 Demand join이 아니라 Candidate snapshot을 사용합니다.
+
+### `demand_index_events`
+
+Demand 변경과 Chroma side effect 사이의 복구 가능한 최소 outbox/audit입니다. `UPSERT`, `DELETE`, `SYNC_ALL` 작업과 `PENDING`, `SUCCEEDED`, `FAILED`, `SKIPPED` 상태, principal actor, 대상 Demand version/hash, attempt count, 안전한 오류 유형, trace/time을 저장합니다. 현재 요청이 commit 후 동기화를 한 번 실행합니다. 실패·건너뜀 event는 새 event로 수동 재시도할 수 있고, crash 후 남은 `PENDING`은 관리자 전체 sync로 복구합니다. 자동 retry/backoff worker는 후속 범위입니다.
 
 ### `esg_scenarios`
 
@@ -285,24 +297,26 @@ FK 삭제 정책:
 | Seed/reset | Case, PENDING Confirmation, DEMO Demands |
 | Confirmation | Confirmation, Workflow 상태, Audit Event |
 | Passport | Passport upsert, Workflow 상태, Audit Event |
-| Match | Match Run, 전체 Candidate, Rule 결과, Workflow 상태, Audit Event |
+| Match prepare | PENDING MatchRun, Passport hash, active Rule policy revision |
+| Match inference | DB transaction/Case lock 없음; BGE·Chroma·PostgreSQL Demand hydrate |
+| Match persist | Passport/Demand snapshot 재검증, Candidate snapshot, Workflow 상태, Audit Event |
 | Decision | 최신 Candidate 검증, Decision upsert, Workflow 상태, Audit Event |
 | Scenario | Decision·Passport 검증, Scenario, Workflow 상태, Audit Event |
 | Receipt | 전체 관계 검증, Receipt snapshot, Workflow 상태, Audit Event |
 
-현재 MVP API는 SQLAlchemy Session transaction으로 위 단위를 원자적으로 처리하며, 모든 Workflow 변경 전에 해당 Case를 `SELECT ... FOR UPDATE`로 잠급니다. 따라서 같은 Case의 동시 상태 전이는 PostgreSQL에서 직렬화됩니다. 제품화 전에는 lock timeout, deadlock 관찰과 부하 테스트를 추가해야 합니다.
+현재 MVP API는 각 DB 단계에서 Case를 `SELECT ... FOR UPDATE`로 잠급니다. Demand 변경도 해당 row를 잠근 뒤 version/hash를 갱신합니다. Match persist와 승인 Decision은 참조 Demand도 ID 순으로 잠가 동시 관리자 변경과 직렬화합니다. Match의 외부 inference는 prepare commit 후, persist lock 전 실행하므로 장시간 row lock이나 connection을 잡지 않습니다. persist 시 execution token, Case 상태, Passport hash, Demand version/hash와 실제 평가한 Rule 입력이 달라지면 PENDING run을 FAILED로 기록하고 409를 반환합니다. Provider가 보낸 Rule 결과와 aggregate source type은 신뢰하지 않고 잠긴 DB snapshot과 Passport로 재계산해 저장합니다.
 
 ## 6. ChromaDB 연결 경계
 
 ChromaDB 자체는 PostgreSQL migration 대상이 아니며 선택한 BGE Provider가 다음 원칙으로 동기화합니다.
 
 1. PostgreSQL Demand를 관계형 원본으로 둡니다.
-2. `demand_id`를 Chroma document ID로 사용해 upsert합니다.
+2. `demand_id`를 Chroma document ID로 사용하고 Demand version/hash를 vector metadata로 upsert합니다.
 3. collection metadata에 embedding model name을 기록하고 다른 모델의 기존 collection은 거부합니다.
-4. Chroma 검색 ID를 PostgreSQL Demand와 조인한 뒤 API 후보로 반환합니다.
+4. Chroma 검색 ID를 PostgreSQL Demand와 조인하고 version/hash가 모두 존재하며 같은 hit만 API 후보로 반환합니다. lineage가 없는 legacy hit는 wildcard로 인정하지 않습니다.
 5. Case, Decision, Receipt, 사용자 정보를 Chroma에 저장하지 않습니다.
 
-Demand create/update/deactivate API는 PostgreSQL transaction을 먼저 완료하고 Chroma upsert/delete를 수행합니다. 외부 index 실패 시 PostgreSQL 변경은 보존되고 API가 `503 DEMAND_INDEX_UNAVAILABLE`로 알립니다. 시작 시 또는 `POST /api/v1/demands/index/sync`로 활성 전체를 upsert하고 stale ID를 삭제할 수 있습니다. 운영 제품에서는 이 동기화를 transactional outbox와 재시도 worker로 발전시켜야 합니다.
+Demand create/update/deactivate API는 PostgreSQL transaction에 `demand_index_events`를 함께 저장하고 commit 후 Chroma upsert/delete를 수행합니다. 외부 index 실패 시 PostgreSQL 변경과 FAILED event가 보존되고 API가 `503 DEMAND_INDEX_UNAVAILABLE`로 알립니다. 시작·Demo reset 또는 `POST /api/v1/demands/index/sync`로 활성 전체를 upsert하고 stale ID를 삭제할 수 있습니다. embedded BGE/Chroma 연산은 한 프로세스 안에서 직렬화되고 단건 event도 PostgreSQL 최신 상태를 다시 읽지만, 여러 API worker의 완전한 분산 직렬화는 아직 지원하지 않으므로 BGE embedded 배포는 단일 worker를 사용합니다.
 
 ## 7. Migration과 테스트
 
@@ -320,9 +334,9 @@ Demand create/update/deactivate API는 PostgreSQL transaction을 먼저 완료�
 - SSO/OIDC, 사용자·조직·사업장 tenant와 key lifecycle 테이블
 - 범용 idempotency request hash·처리 상태 테이블
 - Decision versioning과 재개 정책
-- Demand index sync outbox·재시도 상태와 index revision
+- Demand index event 자동 retry worker·backoff·index revision metrics
 - PostgreSQL lock timeout·deadlock 관찰과 다중 worker 부하 테스트
 - 개인정보 보존·삭제와 DB backup 정책
 - 실제 인계 증빙이 필요한 경우 별도 도메인·법적 설계
 - 운영 object storage, malware scan, retention/deletion worker
-- Match 결과에 실행한 `rule_policy_version_id` 고정
+- 실제 inference wall-clock timeout과 multi-worker 부하 제어

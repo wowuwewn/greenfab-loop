@@ -241,7 +241,10 @@ def test_rule_policy_catalog_versions_and_activation(client) -> None:
 
     listing = client.get("/api/v1/rule-policies")
     assert listing.status_code == 200
-    assert [policy["policy_key"] for policy in listing.json()] == ["resource-default"]
+    assert [policy["policy_key"] for policy in listing.json()] == [
+        "match-deterministic-v0",
+        "resource-default",
+    ]
 
     invalid = client.post(
         "/api/v1/rule-policies/invalid-policy/versions",
@@ -278,6 +281,13 @@ def test_rule_policy_catalog_versions_and_activation(client) -> None:
         },
     )
     assert invalid_numeric_field.status_code == 422
+
+    reserved = client.post(
+        "/api/v1/rule-policies/match-deterministic-v0/versions",
+        json=first_payload,
+    )
+    assert reserved.status_code == 409
+    assert reserved.json()["error"]["code"] == "RULE_POLICY_RESERVED"
 
 
 def test_case_list_pagination_search_and_status_filter(client, session_factory) -> None:

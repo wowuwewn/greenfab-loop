@@ -85,3 +85,8 @@ def test_cors_requires_explicit_origins() -> None:
 def test_demo_actor_cannot_be_blank() -> None:
     with pytest.raises(ValidationError, match="DEMO_ACTOR cannot be blank"):
         Settings(demo_actor="   ")
+
+
+def test_match_rule_policy_key_is_fixed_until_provisioning_exists() -> None:
+    with pytest.raises(ValidationError):
+        Settings(match_rule_policy_key="custom-policy")

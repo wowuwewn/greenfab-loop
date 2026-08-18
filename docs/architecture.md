@@ -65,7 +65,7 @@ flowchart LR
 4. `CONFIRMED`인 경우에만 DEMO Resource Passport를 저장합니다.
 5. Backend가 Passport를 현재 설정된 Match Provider에 전달합니다.
 6. Match Provider가 후보를 반환하고 Rule Service가 명시적 조건을 검사합니다.
-7. Backend가 Match 실행과 후보를 하나의 트랜잭션으로 저장합니다.
+7. Backend가 짧은 persist transaction에서 입력 snapshot을 재검증하고 Match 후보를 저장합니다.
 8. 사람이 후보와 근거를 확인한 뒤 최종 Decision을 입력합니다.
 9. Scenario Service가 `candidate_diversion_quantity`만 계산합니다.
 10. Receipt Service가 전체 결정 상태를 스냅샷으로 저장합니다.
@@ -96,9 +96,15 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - CPU가 기본이며 `BGE_DEVICE`로 다른 장치를 명시할 수 있습니다.
 - 공식 모델 카드 기준 약 567M parameters/4.59GB 모델이므로 core image에 포함하지 않고 CPU 기본 batch를 4로 제한합니다.
 - PostgreSQL의 활성 Demand를 `demand_id` 기준으로 ChromaDB에 upsert하고 비활성 ID는 삭제합니다.
+- vector metadata의 Demand version/hash가 PostgreSQL과 다르면 stale hit를 버립니다.
+- version/hash가 없는 legacy hit도 현재 Demand에 wildcard로 결합하지 않고 제외합니다.
+- 비어 있고 lineage metadata가 없는 legacy collection은 cosine/model/revision metadata로 안전하게 재생성하며, 데이터가 있는 legacy collection은 재색인을 요구하며 시작을 거부합니다.
 - 실제 계산된 `semantic_similarity`와 Top-k 후보를 반환합니다.
 - query/document embedding을 normalize하고 cosine distance `d`를 `1 - d` similarity로 변환합니다.
 - Chroma hit의 ID를 PostgreSQL Demand와 다시 조인한 후 deterministic Rule을 실행합니다.
+- stale ID를 고려해 overfetch하고 활성 PostgreSQL 후보 Top-3만 반환합니다.
+- 모델은 lazy single load, CPU 기본, 프로세스당 concurrency 1 기본입니다.
+- embedded 모델·collection 접근은 한 프로세스 안에서 Match와 index mutation 사이에 직렬화됩니다.
 - embedded persistent client와 별도 HTTP Chroma server를 모두 지원합니다.
 
 기본은 반복 가능한 `MockMatchProvider`입니다. BGE runtime을 선택한 뒤 모델·Chroma가 실패하면 시작/readiness 또는 Match가 실패하며 Mock으로 조용히 대체하지 않습니다. 테스트에서는 `create_app(match_provider=...)`로 fake Provider를 주입합니다.
@@ -144,15 +150,15 @@ MatchProvider.match(passport, top_k) -> MatchResult
 
 ## 8. 트랜잭션과 장애 처리
 
-- 상태 변경 API는 SQLAlchemy transaction 안에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 현재 상태를 확인하고 관련 객체를 함께 저장합니다.
-- Match 실행과 후보 저장, Decision과 Audit Event, Receipt와 스냅샷 저장은 각각 원자적으로 처리합니다.
+- 상태 변경 API는 SQLAlchemy transaction 안에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠급니다. Match만 prepare→외부 inference→persist로 나뉘며 inference 중에는 transaction과 Case lock을 유지하지 않습니다.
+- Match는 짧은 prepare transaction, transaction 없는 provider inference, 짧은 persist transaction으로 분리합니다. persist 전에 Case·Passport·Demand·Rule 입력 snapshot과 execution token을 다시 검증하고, Rule 결과와 aggregate source type은 잠근 PostgreSQL Demand와 Passport에서 서버가 다시 계산합니다.
 - 잘못된 단계 요청은 `409 INVALID_STATE`로 거절합니다.
-- Match와 Receipt는 선택적 `Idempotency-Key`를 지원하며 UI에서는 매번 전송하는 것을 권장합니다.
+- Match와 Receipt는 선택적 `Idempotency-Key`를 지원하며 UI에서는 매번 전송하는 것을 권장합니다. Match의 오래된 PENDING lease는 새 execution token으로 안전하게 회수하고, 이전 inference 결과는 거부합니다.
 - Scenario는 Case당 하나만 저장하고 재요청 시 같은 결과를 반환합니다.
 - PostgreSQL 또는 Evidence storage 접근이 실패하면 readiness가 실패합니다. 응답은 주입된 Provider class 이름도 함께 표시합니다.
 - 미완성 객체를 저장하고 성공 응답을 반환하지 않습니다.
 - 모든 오류 응답에는 추적 가능한 `trace_id`를 포함합니다.
-- 같은 Case의 동시 상태 전이는 PostgreSQL row lock으로 직렬화합니다. 제품화 전에는 lock timeout·deadlock 관찰과 다중 worker 부하 테스트를 추가합니다.
+- 같은 Case와 같은 Demand의 동시 상태 전이는 PostgreSQL row lock으로 직렬화합니다. embedded BGE/Chroma index 연산은 현재 프로세스 안에서만 직렬화되므로 단일 API worker 배포를 사용해야 합니다. 다중 worker에는 PostgreSQL advisory lock 또는 전용 index worker가 필요합니다.
 
 ## 9. 실행·배포 기준
 
@@ -189,5 +195,6 @@ chroma       BGE HTTP mode에서 Compose match profile로 선택 구성
 - 운영 SSO/OIDC·조직 tenant와 API key rotation/revocation
 - Detect import scheduler와 MES/QMS connector
 - Evidence object storage, malware scan, retention/deletion worker
-- Demand index sync의 transactional outbox·재시도 worker와 운영 관측
+- Demand index event의 자동 재시도 worker·backoff·운영 관측
+- 다중 API worker용 분산 index lock 또는 단일 전용 index worker
 - 실제 인계 증빙이 필요할 경우 별도의 정책·API·법적 검토

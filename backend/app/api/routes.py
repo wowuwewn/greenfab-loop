@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.auth import AuthPrincipal, require_min_role
+from app.auth import AuthPrincipal, require_min_role, require_min_role_without_actor_override
 from app.config import settings
 from app.database import get_db
 from app.enums import ApiRole, EvidenceType, WorkflowStatus
@@ -19,6 +19,7 @@ from app.schemas import (
     CaseSummary,
     DecisionRequest,
     DemandCreate,
+    DemandIndexEventOut,
     DemandIndexSyncOut,
     DemandOut,
     DemandUpdate,
@@ -32,6 +33,16 @@ from app.schemas import (
     RulePolicyVersionCreate,
 )
 from app.seed import GOLDEN_CASE_ID, reset_demo_data
+from app.services.demand import (
+    complete_index_event,
+    create_demand,
+    create_index_event,
+    create_index_event_retry,
+    deactivate_demand,
+    list_demands,
+    list_index_events,
+    update_demand,
+)
 from app.services.evidence import (
     add_passport_evidence,
     delete_evidence_safely,
@@ -40,13 +51,7 @@ from app.services.evidence import (
     list_passport_evidence,
     to_evidence_out,
 )
-from app.services.demand import (
-    create_demand,
-    deactivate_demand,
-    list_demands,
-    update_demand,
-)
-from app.services.match import DemandIndexManager, MatchProvider
+from app.services.match import DemandIndexManager, IndexSyncResult, MatchProvider
 from app.services.rule_catalog import (
     activate_rule_policy_version,
     create_rule_policy_version,
@@ -55,13 +60,15 @@ from app.services.rule_catalog import (
 )
 from app.services.workflow import (
     build_case_envelope,
+    complete_match,
     confirm_resource,
     create_esg_scenario,
     create_receipt,
+    fail_match,
     get_case,
     get_case_envelope,
     list_case_summaries,
-    run_match,
+    prepare_match,
     save_decision,
     save_passport,
 )
@@ -81,6 +88,14 @@ ViewerPrincipal = Annotated[AuthPrincipal, Depends(require_min_role(ApiRole.VIEW
 OperatorPrincipal = Annotated[AuthPrincipal, Depends(require_min_role(ApiRole.OPERATOR))]
 DecisionPrincipal = Annotated[AuthPrincipal, Depends(require_min_role(ApiRole.DECISION_MAKER))]
 AdminPrincipal = Annotated[AuthPrincipal, Depends(require_min_role(ApiRole.ADMIN))]
+StrictViewerPrincipal = Annotated[
+    AuthPrincipal,
+    Depends(require_min_role_without_actor_override(ApiRole.VIEWER)),
+]
+StrictAdminPrincipal = Annotated[
+    AuthPrincipal,
+    Depends(require_min_role_without_actor_override(ApiRole.ADMIN)),
+]
 PolicyKey = Annotated[
     str,
     ApiPath(min_length=1, max_length=100, pattern=r"^[a-z0-9][a-z0-9._-]*$"),
@@ -120,26 +135,51 @@ def _demand_index(request: Request) -> DemandIndexManager | None:
     return provider if isinstance(provider, DemandIndexManager) else None
 
 
-def _sync_demand(request: Request, demand_id: str, *, active: bool) -> None:
+def _process_demand_index_event(
+    request: Request,
+    db: Session,
+    event_id: str,
+    *,
+    operation: str,
+    demand_id: str | None = None,
+) -> IndexSyncResult | None:
     index = _demand_index(request)
     if index is None:
-        return
+        with db.begin():
+            complete_index_event(db, event_id, status="SKIPPED")
+        return None
     try:
-        if active:
+        if operation == "UPSERT" and demand_id is not None:
             index.upsert_demand(demand_id)
-        else:
+            result = IndexSyncResult(upserted=1, deleted=0)
+        elif operation == "DELETE" and demand_id is not None:
             index.delete_demand(demand_id)
+            result = IndexSyncResult(upserted=0, deleted=1)
+        elif operation == "SYNC_ALL":
+            result = index.sync_all_demands()
+        else:
+            raise RuntimeError("Invalid Demand index operation")
     except Exception as exc:
         logger.error(
             "Demand index mutation failed demand_id=%s error_type=%s",
-            demand_id,
+            demand_id or "ALL",
             type(exc).__name__,
         )
+        with db.begin():
+            complete_index_event(
+                db,
+                event_id,
+                status="FAILED",
+                error_message=type(exc).__name__,
+            )
         raise DomainError(
             "DEMAND_INDEX_UNAVAILABLE",
             "Demand는 PostgreSQL에 저장됐지만 검색 인덱스를 갱신하지 못했습니다.",
             503,
         ) from exc
+    with db.begin():
+        complete_index_event(db, event_id, status="SUCCEEDED")
+    return result
 
 
 @api_router.get("/cases", response_model=list[CaseSummary])
@@ -173,7 +213,7 @@ def read_case(case_id: str, db: DbSession, _principal: ViewerPrincipal) -> CaseE
 @api_router.get("/demands", response_model=list[DemandOut])
 def read_demands(
     db: DbSession,
-    _principal: ViewerPrincipal,
+    _principal: StrictViewerPrincipal,
     include_inactive: bool = False,
 ) -> list[DemandOut]:
     records = list_demands(db, include_inactive=include_inactive)
@@ -185,12 +225,27 @@ def add_demand(
     payload: DemandCreate,
     request: Request,
     db: DbSession,
-    principal: AdminPrincipal,
+    principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
         record = create_demand(db, payload)
+        event = create_index_event(
+            db,
+            operation="UPSERT",
+            demand_id=record.demand_id,
+            requested_by=principal.actor,
+            target_version=record.version,
+            target_content_sha256=record.content_sha256,
+            trace_id=_trace_id(request),
+        )
         result = DemandOut.model_validate(record)
-    _sync_demand(request, record.demand_id, active=True)
+    _process_demand_index_event(
+        request,
+        db,
+        event.event_id,
+        operation="UPSERT",
+        demand_id=record.demand_id,
+    )
     return result
 
 
@@ -200,12 +255,27 @@ def replace_demand(
     payload: DemandUpdate,
     request: Request,
     db: DbSession,
-    principal: AdminPrincipal,
+    principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
         record = update_demand(db, demand_id, payload)
+        event = create_index_event(
+            db,
+            operation="UPSERT",
+            demand_id=record.demand_id,
+            requested_by=principal.actor,
+            target_version=record.version,
+            target_content_sha256=record.content_sha256,
+            trace_id=_trace_id(request),
+        )
         result = DemandOut.model_validate(record)
-    _sync_demand(request, record.demand_id, active=True)
+    _process_demand_index_event(
+        request,
+        db,
+        event.event_id,
+        operation="UPSERT",
+        demand_id=record.demand_id,
+    )
     return result
 
 
@@ -214,41 +284,104 @@ def remove_demand_from_matching(
     demand_id: str,
     request: Request,
     db: DbSession,
-    principal: AdminPrincipal,
+    principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
         record = deactivate_demand(db, demand_id)
+        event = create_index_event(
+            db,
+            operation="DELETE",
+            demand_id=record.demand_id,
+            requested_by=principal.actor,
+            target_version=record.version,
+            target_content_sha256=record.content_sha256,
+            trace_id=_trace_id(request),
+        )
         result = DemandOut.model_validate(record)
-    _sync_demand(request, record.demand_id, active=False)
+    _process_demand_index_event(
+        request,
+        db,
+        event.event_id,
+        operation="DELETE",
+        demand_id=record.demand_id,
+    )
     return result
 
 
 @api_router.post("/demands/index/sync", response_model=DemandIndexSyncOut)
 def reconcile_demand_index(
     request: Request,
-    _principal: AdminPrincipal,
+    db: DbSession,
+    principal: StrictAdminPrincipal,
 ) -> DemandIndexSyncOut:
-    index = _demand_index(request)
-    if index is None:
+    with db.begin():
+        event = create_index_event(
+            db,
+            operation="SYNC_ALL",
+            requested_by=principal.actor,
+            trace_id=_trace_id(request),
+        )
+    result = _process_demand_index_event(
+        request,
+        db,
+        event.event_id,
+        operation="SYNC_ALL",
+    )
+    if result is None:
         raise DomainError(
             "DEMAND_INDEX_NOT_CONFIGURED",
             "현재 Match Provider에는 Demand 검색 인덱스가 없습니다.",
             409,
         )
-    try:
-        result = index.sync_all_demands()
-    except Exception as exc:
-        logger.error("Demand index reconciliation failed error_type=%s", type(exc).__name__)
-        raise DomainError(
-            "DEMAND_INDEX_UNAVAILABLE",
-            "Demand 검색 인덱스를 동기화하지 못했습니다.",
-            503,
-        ) from exc
     return DemandIndexSyncOut(
-        provider=index.provider_name,
+        provider=_demand_index(request).provider_name,
         upserted=result.upserted,
         deleted=result.deleted,
     )
+
+
+@api_router.get("/demands/index/events", response_model=list[DemandIndexEventOut])
+def read_demand_index_events(
+    db: DbSession,
+    _principal: StrictAdminPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[DemandIndexEventOut]:
+    return [DemandIndexEventOut.model_validate(item) for item in list_index_events(db, limit=limit)]
+
+
+@api_router.post(
+    "/demands/index/events/{event_id}/retry",
+    response_model=DemandIndexEventOut,
+    status_code=201,
+)
+def retry_demand_index_event(
+    event_id: str,
+    request: Request,
+    db: DbSession,
+    principal: StrictAdminPrincipal,
+) -> DemandIndexEventOut:
+    with db.begin():
+        event = create_index_event_retry(
+            db,
+            event_id,
+            requested_by=principal.actor,
+            trace_id=_trace_id(request),
+        )
+        retry_event_id = event.event_id
+        operation = event.operation
+        demand_id = event.demand_id
+    _process_demand_index_event(
+        request,
+        db,
+        retry_event_id,
+        operation=operation,
+        demand_id=demand_id,
+    )
+    with db.begin():
+        completed = db.get(type(event), retry_event_id)
+        if completed is None:
+            raise RuntimeError("Completed Demand index event is missing")
+        return DemandIndexEventOut.model_validate(completed)
 
 
 @api_router.put("/cases/{case_id}/resource-confirmation", response_model=CaseEnvelope)
@@ -303,18 +436,55 @@ def create_match(
     principal: OperatorPrincipal,
     idempotency_key: IdempotencyKey = None,
 ) -> CaseEnvelope:
+    provider = _match_provider(request)
     with db.begin():
-        record = run_match(
+        prepared = prepare_match(
             db,
             case_id,
-            _match_provider(request),
+            provider,
             top_k=payload.top_k,
             idempotency_key=idempotency_key,
+            rule_policy_key=settings.match_rule_policy_key,
+            pending_timeout_seconds=settings.match_pending_timeout_seconds,
+        )
+        if prepared.already_completed:
+            record = get_case(db, case_id)
+            return build_case_envelope(db, record)
+
+    try:
+        provider_result = provider.match(prepared.passport_input, top_k=payload.top_k)
+    except Exception as exc:
+        logger.error(
+            "Match provider failed case_id=%s error_type=%s",
+            case_id,
+            type(exc).__name__,
+        )
+        with db.begin():
+            fail_match(
+                db,
+                prepared.match_run_id,
+                error_code="PROVIDER_UNAVAILABLE",
+                execution_token=prepared.execution_token,
+            )
+        raise DomainError(
+            "MATCH_UNAVAILABLE",
+            "Match 서비스를 일시적으로 사용할 수 없습니다.",
+            503,
+        ) from exc
+
+    with db.begin():
+        completion = complete_match(
+            db,
+            case_id,
+            prepared,
+            provider_result,
             actor=principal.actor,
             trace_id=_trace_id(request),
         )
-        result = build_case_envelope(db, record)
-    return result
+        response = build_case_envelope(db, completion.record) if completion.error is None else None
+    if completion.error is not None:
+        raise completion.error
+    return response
 
 
 @api_router.put("/cases/{case_id}/decision", response_model=CaseEnvelope)
@@ -385,14 +555,26 @@ def read_receipt(case_id: str, db: DbSession, _principal: ViewerPrincipal) -> Ca
 
 
 @api_router.post("/demo/reset", response_model=CaseEnvelope)
-def reset_demo(request: Request, db: DbSession, _principal: AdminPrincipal) -> CaseEnvelope:
+def reset_demo(request: Request, db: DbSession, _principal: StrictAdminPrincipal) -> CaseEnvelope:
     if not settings.demo_mode or not settings.demo_reset_enabled:
         raise DomainError("NOT_FOUND", "Demo reset을 사용할 수 없습니다.", 404)
     storage = _evidence_storage(request)
     with db.begin():
         storage_keys = evidence_storage_keys_for_case(db, GOLDEN_CASE_ID)
         record = reset_demo_data(db)
+        event = create_index_event(
+            db,
+            operation="SYNC_ALL",
+            requested_by=_principal.actor,
+            trace_id=_trace_id(request),
+        )
         result = build_case_envelope(db, record)
+    _process_demand_index_event(
+        request,
+        db,
+        event.event_id,
+        operation="SYNC_ALL",
+    )
     for storage_key in storage_keys:
         delete_evidence_safely(storage, storage_key)
     return result
@@ -496,6 +678,12 @@ def create_policy_version(
     db: DbSession,
     principal: AdminPrincipal,
 ) -> RulePolicyOut:
+    if policy_key == settings.match_rule_policy_key:
+        raise DomainError(
+            "RULE_POLICY_RESERVED",
+            "내장 Match evaluator policy는 애플리케이션 버전과 함께 관리됩니다.",
+            409,
+        )
     with db.begin():
         result = create_rule_policy_version(db, policy_key, payload, actor=principal.actor)
     return result
@@ -511,6 +699,12 @@ def activate_policy_version(
     db: DbSession,
     principal: AdminPrincipal,
 ) -> RulePolicyOut:
+    if policy_key == settings.match_rule_policy_key:
+        raise DomainError(
+            "RULE_POLICY_RESERVED",
+            "내장 Match evaluator policy는 애플리케이션 버전과 함께 관리됩니다.",
+            409,
+        )
     with db.begin():
         result = activate_rule_policy_version(db, policy_key, version, actor=principal.actor)
     return result

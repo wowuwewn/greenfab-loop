@@ -70,3 +70,21 @@ def require_min_role(minimum_role: ApiRole):
         return principal
 
     return dependency
+
+
+def require_min_role_without_actor_override(minimum_role: ApiRole):
+    """Authorize a principal while ignoring the demo-only ``X-Actor`` header.
+
+    Demand/index administration always records the configured principal actor,
+    even in demo mode, so an arbitrary header cannot spoof its audit trail.
+    """
+
+    def dependency(
+        api_key: Annotated[str | None, Security(_api_key_header)],
+    ) -> AuthPrincipal:
+        principal = get_principal(api_key, None)
+        if _ROLE_LEVEL[principal.role] < _ROLE_LEVEL[minimum_role]:
+            raise DomainError("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.", 403)
+        return principal
+
+    return dependency

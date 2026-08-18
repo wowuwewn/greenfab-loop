@@ -146,7 +146,7 @@ candidate_diversion_quantity = 0
 
 ## 6. 동시성·중복 요청
 
-- 모든 상태 변경은 SQLAlchemy transaction 안에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 현재 상태를 검사합니다. 같은 Case의 동시 전이는 PostgreSQL에서 직렬화됩니다.
+- 모든 DB 상태 변경은 대상 Case를 `SELECT ... FOR UPDATE`로 잠급니다. Match는 PENDING run/Passport hash/policy revision을 짧게 고정한 뒤 transaction 밖에서 provider inference를 실행하고, persist transaction에서 Passport와 Demand snapshot을 재검증합니다.
 - Match와 Receipt는 선택적 `Idempotency-Key`를 지원하고 Client가 항상 전송하는 것을 권장합니다.
 - `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자여야 합니다.
 - 같은 Case의 Match에서 같은 키를 재사용하면 기존 실행을 반환합니다. key 범위는 Case이므로 다른 Case에서는 같은 문자열을 사용할 수 있습니다.
@@ -180,5 +180,5 @@ Match의 모델명·snapshot ID 같은 실행 metadata는 `payload_json`에 명�
 
 - SSO/OIDC, 조직 tenant와 resource-level 권한
 - Decision versioning·HOLD 재개 정책
-- 실제 BGE/Chroma Provider 장애·재시도 상태
+- 실제 inference wall-clock timeout과 multi-worker 부하 제어
 - Idempotency request hash와 처리 중 상태를 저장하는 범용 테이블

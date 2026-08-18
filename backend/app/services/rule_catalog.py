@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -20,7 +22,55 @@ from app.schemas import (
     RulePolicyVersionCreate,
     RulePolicyVersionOut,
 )
-from app.services.workflow import utcnow
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveRulePolicySnapshot:
+    policy_key: str
+    version: int
+    definition_sha256: str
+    definition_json: dict
+
+
+def get_active_rule_policy_snapshot(
+    session: Session,
+    policy_key: str,
+) -> ActiveRulePolicySnapshot:
+    """Resolve the active immutable policy revision used for Match lineage."""
+
+    policy = session.scalar(
+        select(RulePolicy)
+        .where(RulePolicy.policy_key == policy_key)
+        .options(selectinload(RulePolicy.versions))
+    )
+    if policy is None or policy.active_version is None:
+        raise DomainError(
+            "RULE_POLICY_NOT_ACTIVE",
+            "Match에 사용할 active Rule policy가 없습니다.",
+            409,
+        )
+    version = next(
+        (item for item in policy.versions if item.version == policy.active_version),
+        None,
+    )
+    if version is None:
+        raise DomainError(
+            "RULE_POLICY_INTEGRITY_ERROR",
+            "Active Rule policy revision을 찾을 수 없습니다.",
+            500,
+        )
+    if version.definition_json.get("evaluator") != "demand-rules-v0.1":
+        raise DomainError(
+            "RULE_POLICY_INCOMPATIBLE",
+            "Active policy는 현재 deterministic evaluator 계약과 호환되지 않습니다.",
+            409,
+        )
+    return ActiveRulePolicySnapshot(
+        policy_key=policy.policy_key,
+        version=version.version,
+        definition_sha256=version.definition_sha256,
+        definition_json=dict(version.definition_json),
+    )
 
 
 def list_rule_policies(session: Session) -> list[RulePolicyOut]:
@@ -102,7 +152,7 @@ def activate_rule_policy_version(
             "RULE_POLICY_VERSION_NOT_FOUND", "Rule policy version을 찾을 수 없습니다.", 404
         )
     record.active_version = version_number
-    selected.activated_at = utcnow()
+    selected.activated_at = datetime.now(UTC)
     selected.activated_by = actor
     session.flush()
     return to_policy_out(record)

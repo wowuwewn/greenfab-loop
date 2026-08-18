@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     )
     bge_device: str = "cpu"
     bge_batch_size: int = Field(default=4, ge=1, le=256)
+    match_max_concurrency: int = Field(default=1, ge=1, le=16)
+    match_queue_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    match_pending_timeout_seconds: int = Field(default=120, ge=30, le=3600)
+    # v0.1 ships one reserved evaluator contract. A configurable key without
+    # a trusted provisioning path would make production Match impossible.
+    match_rule_policy_key: Literal["match-deterministic-v0"] = "match-deterministic-v0"
     chroma_mode: Literal["persistent", "http"] = "persistent"
     chroma_collection_name: str = "greenfab_demands"
     chroma_persist_directory: str = ".data/chroma"

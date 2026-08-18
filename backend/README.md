@@ -96,6 +96,10 @@ alembic revision --autogenerate -m "describe change"
 | `BGE_MODEL_NAME`, `BGE_MODEL_REVISION` | `BAAI/bge-m3`, `5617a9f…` | embedding 모델과 고정 Hugging Face revision |
 | `BGE_DEVICE` | `cpu` | CPU-first 실행 장치; CUDA는 명시 선택 |
 | `BGE_BATCH_SIZE` | `4` | CPU 메모리를 고려한 보수적인 embedding batch |
+| `MATCH_MAX_CONCURRENCY` | `1` | 프로세스당 동시 BGE inference 상한 |
+| `MATCH_QUEUE_TIMEOUT_SECONDS` | `30` | inference slot 대기 상한; 초과 시 503 |
+| `MATCH_PENDING_TIMEOUT_SECONDS` | `120` | crash 후 PENDING Match lease를 회수할 최소 시간 |
+| `MATCH_RULE_POLICY_KEY` | `match-deterministic-v0` | v0.1 고정 reserved policy; 다른 값은 시작 거부 |
 | `CHROMA_MODE` | `persistent` | embedded persistent client 또는 `http` server |
 | `CHROMA_*` | `.env.example` 참고 | collection, 경로 또는 HTTP 연결 설정 |
 | `DEMAND_INDEX_SYNC_ON_STARTUP` | `true` | BGE Provider 시작 시 PostgreSQL Demand 전체 재동기화 |
@@ -107,7 +111,7 @@ alembic revision --autogenerate -m "describe change"
 DEMO_RESET_ENABLED=true
 ```
 
-Reset은 `SECOM-0116`에 연결된 Workflow만 초기화하고 다른 Case와 공용 Demand는 보존합니다.
+Reset은 `SECOM-0116`에 연결된 Workflow만 초기화하고 다른 Case와 공용 Demand는 보존합니다. DEMO Demand 원복 뒤 BGE Provider의 전체 index sync를 실행하며, 실패는 DB event에 남기고 `503`으로 알립니다.
 
 `ENVIRONMENT`가 `development`, `test`, `local` 외 값이면 다음 세 값을 모두 false로 설정해야
 합니다. 하나라도 true이면 설정 검증에서 서버 시작을 거부합니다.
@@ -270,7 +274,8 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 - BGE-M3는 고정 revision으로 프로세스 시작 시 한 번 로드
 - CPU 기본, CUDA 명시 선택
 - PostgreSQL 활성 Demand를 `demand_id`로 ChromaDB upsert하고 비활성 ID는 삭제
-- Chroma에는 검색 문서와 ID만 저장하고, 후보·Rule 필드는 매 요청 PostgreSQL에서 다시 조회
+- Chroma에는 검색 문서, `demand_id`, version/hash metadata만 저장하고, 후보·Rule 필드는 PostgreSQL에서 읽은 뒤 MatchCandidate snapshot으로 고정
+- stale vector ID를 고려해 overfetch한 뒤 활성 PostgreSQL 후보 Top-3만 사용
 - 동일한 deterministic Rule Service 재사용
 - Passport 또는 검색된 Demand 중 하나라도 `DEMO`이면 Match `source_type`도 `DEMO`
 - 장애 시 Mock으로 조용히 전환하지 않고 `503 MATCH_UNAVAILABLE`
@@ -283,21 +288,23 @@ POST /api/v1/demands
 PUT  /api/v1/demands/{demand_id}
 POST /api/v1/demands/{demand_id}/deactivate
 POST /api/v1/demands/index/sync
+GET  /api/v1/demands/index/events
 ```
 
-Create/update/deactivate는 PostgreSQL을 먼저 source of truth로 갱신한 뒤 선택된 BGE Provider의 Chroma index를 동기화합니다. 외부 index 갱신만 실패하면 API는 `503 DEMAND_INDEX_UNAVAILABLE`로 DB 저장 사실을 숨기지 않으며, 전체 sync endpoint로 재조정할 수 있습니다. 인증이 추가되기 전에는 이 관리 API를 공개 인터넷에 노출하지 않습니다.
+읽기는 `VIEWER+`, create/update/deactivate/index sync와 event 조회는 `ADMIN`만 허용합니다. 이 경로들은 `X-Actor`를 무시하고 API principal actor만 기록합니다. 변경 transaction에 durable `demand_index_events`를 먼저 만들고, commit 후 Chroma를 동기화합니다. 실패하면 DB 변경은 보존되고 event가 `FAILED`가 되며 API는 `503 DEMAND_INDEX_UNAVAILABLE`를 반환합니다. 현재는 관리자가 전체 sync로 재처리하며 자동 worker는 후속 범위입니다.
 
 ## 7. 검증·무결성·동시성
 
 - Pydantic이 문자열 앞뒤 공백을 제거하고 필수 문자열의 whitespace-only 입력을 거부합니다.
 - Passport의 `quantity`와 `unit`은 API와 DB 모두에서 함께 존재하거나 함께 `null`이어야 합니다.
 - Confirmation은 `PENDING`일 때 확인자·시각이 모두 `null`, 완료 상태일 때 비어 있지 않은 확인자·시각이 모두 존재해야 합니다.
-- 모든 Workflow 변경은 PostgreSQL에서 해당 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 실행합니다.
+- Workflow 변경은 PostgreSQL에서 해당 Case를 `SELECT ... FOR UPDATE`로 잠급니다. 단 Match는 짧은 prepare transaction에서 Passport·정책 revision과 PENDING run을 고정하고, BGE/Chroma inference는 lock/transaction 밖에서 수행한 뒤 persist transaction에서 snapshot을 다시 검증합니다.
 - 명시적 Demo mode의 `X-Actor`는 공백 이외 문자를 포함한 1–120자만 허용합니다. Production actor는 API key principal에서 가져옵니다. `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자만 허용합니다.
 - `X-Trace-Id`는 trim 후 1–64자만 재사용하며 빈 값·초과 길이는 서버 UUID로 안전하게 대체합니다.
 - Match/Receipt key 범위는 Case이므로 다른 Case에서 같은 문자열을 재사용할 수 있습니다. 같은 Case의 동시 재시도는 row lock과 DB 제약으로 한 건만 유지합니다.
 - Decision → Match Candidate, Scenario → Decision, Receipt → Decision/Scenario lineage를 FK로 보존합니다.
-- Match, Decision, Scenario, Receipt 저장은 각각 하나의 DB transaction으로 처리합니다.
+- Match 도중 Passport 또는 Demand가 변경되면 PENDING run을 `FAILED`로 남기고 `409`로 재실행을 요구합니다. Candidate의 회사명·설명·Rule 입력·Demand version/hash는 snapshot이므로 이후 Demand 수정이 과거 결과를 바꾸지 않습니다.
+- `APPROVED` 시 선택 Demand가 활성이고 Candidate snapshot과 같은 version/hash인지 다시 확인합니다.
 - DB 장애는 `503 DATABASE_UNAVAILABLE`, Match Provider 장애는 `503 MATCH_UNAVAILABLE`, 예상하지 못한 예외는 stack trace를 숨긴 `500 INTERNAL_ERROR` 공통 형식으로 반환합니다.
 
 ## 8. 데이터·표현 한계
@@ -317,7 +324,7 @@ Create/update/deactivate는 PostgreSQL을 먼저 source of truth로 갱신한 �
 - MES/QMS 또는 artifact registry에서 Detect artifact를 감지해 CLI를 자동 호출하는 scheduler/connector
 - 범용 idempotency request hash·processing 상태
 - PostgreSQL 기반 동시성·부하 테스트
-- Demand 관리 API 인증·권한과 index sync outbox/재시도 worker
+- Demand index event 자동 재시도 worker와 backoff/metrics
 - 실제 인계 증빙이 필요할 경우 별도 도메인·법적 검토
 - 운영 object storage, malware scan, retention/deletion worker
-- active Rule policy를 MatchRun에 연결하고 실행 version을 결과에 고정
+- 실제 inference wall-clock timeout과 multi-worker 부하 제한

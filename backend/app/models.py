@@ -334,6 +334,53 @@ class Demand(TimestampMixin, Base):
         server_default=true(),
         nullable=False,
     )
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class DemandIndexEvent(Base):
+    """Durable record of a PostgreSQL-to-Chroma synchronization attempt."""
+
+    __tablename__ = "demand_index_events"
+    __table_args__ = (
+        CheckConstraint(
+            "operation IN ('UPSERT', 'DELETE', 'SYNC_ALL')",
+            name="ck_demand_index_events_operation",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING', 'SUCCEEDED', 'FAILED', 'SKIPPED')",
+            name="ck_demand_index_events_status",
+        ),
+        CheckConstraint(
+            "(operation = 'SYNC_ALL' AND demand_id IS NULL) OR "
+            "(operation IN ('UPSERT', 'DELETE') AND demand_id IS NOT NULL)",
+            name="ck_demand_index_events_target",
+        ),
+        Index("ix_demand_index_events_status_created_at", "status", "created_at"),
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: _identifier("INDEX")
+    )
+    demand_id: Mapped[str | None] = mapped_column(
+        ForeignKey("demands.demand_id", ondelete="CASCADE"), nullable=True
+    )
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), default="PENDING", server_default="PENDING", nullable=False
+    )
+    requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class RulePolicy(TimestampMixin, Base):
@@ -423,6 +470,16 @@ class MatchRun(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_token: Mapped[str] = mapped_column(
+        String(64), default=lambda: uuid4().hex, nullable=False
+    )
+    passport_snapshot_json: Mapped[dict[str, Any]] = mapped_column(
+        _json_type(), default=dict, nullable=False
+    )
+    passport_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    rule_policy_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    rule_policy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    rule_policy_definition_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
     case: Mapped[Case] = relationship(back_populates="match_runs")
     passport: Mapped[ResourcePassport] = relationship(back_populates="match_runs")
@@ -460,6 +517,9 @@ class MatchCandidate(Base):
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     semantic_similarity: Mapped[float | None] = mapped_column(Float, nullable=True)
     rule_check: Mapped[dict[str, Any]] = mapped_column(_json_type(), default=dict, nullable=False)
+    demand_snapshot_json: Mapped[dict[str, Any]] = mapped_column(
+        _json_type(), default=dict, nullable=False
+    )
     status: Mapped[MatchCandidateStatus] = mapped_column(
         _enum(MatchCandidateStatus, "match_candidate_status"), nullable=False
     )

@@ -1,6 +1,6 @@
 # Backend Productization Foundations
 
-이 문서는 Match/Demand runtime과 독립적으로 추가된 Backend 기반 기능을 설명합니다. 실제
+이 문서는 Productization 기반과 통합된 Match/Demand runtime을 설명합니다. 실제
 법적 인계, 규제 적합성 또는 인증을 구현하거나 주장하지 않습니다.
 
 ## 1. Detect artifact 자동 Import
@@ -57,10 +57,10 @@ Role hierarchy:
 
 | Role | 권한 |
 | --- | --- |
-| `VIEWER` | Case, Receipt, Evidence metadata/content, Rule catalog 조회 |
+| `VIEWER` | Case, Receipt, Evidence metadata/content, Rule catalog, Demand 조회 |
 | `OPERATOR` | VIEWER + Confirm, Passport, Evidence upload, Match, Scenario |
 | `DECISION_MAKER` | OPERATOR + Decision, Receipt 생성 |
-| `ADMIN` | 전체 + Rule policy version/activation, 활성화된 Demo reset |
+| `ADMIN` | 전체 + Demand 변경/index 관리, Rule policy version/activation, 활성화된 Demo reset |
 
 `required` mode에서는 `confirmed_by`, `decided_by`, `X-Actor`를 신뢰하지 않고 API key에 연결된
 actor를 저장합니다. 이 인증은 최소 경계이며 tenant, SSO/OIDC, key rotation UI, DB-backed key
@@ -103,7 +103,7 @@ encryption/KMS, retention/deletion job, signed download 또는 proxy 정책을 �
 
 ## 4. Versioned Rule policy catalog
 
-현재 deterministic Rule 실행을 바꾸지 않고 정책 버전 관리 기반만 제공합니다.
+정책 catalog와 deterministic evaluator lineage를 분리해 추적합니다.
 
 ```text
 GET  /api/v1/rule-policies
@@ -117,9 +117,11 @@ POST /api/v1/rule-policies/{policy_key}/versions/{version}/activate
 creator, activation actor/time과 함께 immutable row로 저장됩니다. 활성 version 변경은 기존
 version을 수정하지 않습니다.
 
-중요: 현재 `MatchRun`과 `MatchCandidate`는 이 catalog version을 아직 참조하지 않습니다.
-Match/Demand runtime branch에서 명시적으로 active policy를 resolve하고 실행 결과에
-`rule_policy_version_id`를 저장하기 전까지 catalog를 실제 판정에 사용했다고 설명하면 안 됩니다.
+Match prepare 시 v0.1 고정 `MATCH_RULE_POLICY_KEY=match-deterministic-v0`의 active revision을 resolve하고 `policy_key`, `version`, `definition_sha256`를 MatchRun과 Audit/Receipt envelope에 고정합니다. 다른 key override는 신뢰할 provisioning 경로가 없으므로 설정 검증에서 서버 시작을 거부합니다. 이 reserved policy는 현재 evaluator가 수량·단위, 필수정보, 위치만 검사한다는 실행 계약을 추적하며 API 변경을 금지합니다. Demand별 실제 조건은 Candidate snapshot에 별도로 저장하며, policy catalog를 법규·안전성 판정으로 설명하면 안 됩니다. `accepted_conditions`는 검색 문서 보강용이고 hard Rule이 아닙니다.
+
+reserved policy version 1은 demo seed가 아니라 `0003_demand_runtime` data migration이 설치하므로
+`SEED_DEMO_DATA=false`인 Production에서도 Match가 동작합니다. Application seed는 create-all 기반
+로컬 테스트를 위해 같은 stable ID/hash를 idempotent하게 보장합니다.
 
 ## 5. Case 검색과 Pagination
 
@@ -144,9 +146,9 @@ CORS에서 위 header와 `X-Trace-Id`를 Frontend에 노출합니다.
 - `/health/live`: process liveness만 확인
 - `/health/ready`: DB `SELECT 1`, Match provider class, Evidence storage 접근 가능 여부 확인
 - 공통 오류 shape에 401, 403, 413을 추가
+- `MATCH_PENDING_TIMEOUT_SECONDS`: 기본 120초, crash로 남은 PENDING Match lease 회수 기준
 
-실제 BGE/Chroma provider readiness, 운영 관리형 PostgreSQL rehearsal·lock/load test, object
-storage readiness, rate limit, SSO, backup과 observability는 별도 운영 작업입니다.
+실제 BGE/Chroma provider readiness가 포함됩니다. 운영 object storage readiness, rate limit, SSO, backup과 observability는 별도 운영 작업입니다.
 
 ## 7. Migration
 
@@ -156,6 +158,10 @@ storage readiness, rate limit, SSO, backup과 observability는 별도 운영 작
 - `cases.detect_import_id`, `risk_score`, `risk_score_type`
 - `passport_evidence`
 - `rule_policies`, `rule_policy_versions`
+
+`0003_demand_runtime`은 Demand lifecycle/version/hash, target revision을 가진 durable index event,
+Match input/policy lineage, execution token, Candidate snapshot과 reserved evaluator policy data를
+추가합니다.
 
 SQLite upgrade/downgrade·schema drift, PostgreSQL offline DDL, 로컬 Docker PostgreSQL 16의
 upgrade와 `alembic check`를 검증했습니다. 운영 적용 전에는 실제 관리형 PostgreSQL 환경에서
