@@ -12,11 +12,13 @@ def test_render_blueprint_keeps_production_safety_contract() -> None:
     service = blueprint["services"][0]
     assert service["type"] == "web"
     assert service["rootDir"] == "backend"
+    assert service["branch"] == "dev"
     assert service["healthCheckPath"] == "/health/live"
     assert service["numInstances"] == 1
     assert service["startCommand"].endswith("--workers 1")
     assert service["preDeployCommand"] == "alembic upgrade head"
     assert service["disk"]["mountPath"] == "/var/data"
+    assert "maxShutdownDelaySeconds" not in service
 
     environment = {item["key"]: item for item in service["envVars"]}
     assert environment["ENVIRONMENT"]["value"] == "production"
