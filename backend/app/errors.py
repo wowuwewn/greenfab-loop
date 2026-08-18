@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,22 @@ def error_payload(
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(StarletteHTTPException)
+    async def handle_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        trace_id = getattr(request.state, "trace_id", str(uuid4()))
+        code, message = {
+            404: ("NOT_FOUND", "요청한 경로 또는 리소스를 찾을 수 없습니다."),
+            405: ("METHOD_NOT_ALLOWED", "이 경로에서 지원하지 않는 요청 방식입니다."),
+        }.get(
+            exc.status_code,
+            ("HTTP_ERROR", "HTTP 요청을 처리할 수 없습니다."),
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=error_payload(code=code, message=message, trace_id=trace_id),
+            headers=exc.headers,
+        )
+
     @app.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:
         trace_id = getattr(request.state, "trace_id", str(uuid4()))

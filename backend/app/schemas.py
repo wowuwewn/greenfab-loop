@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -287,7 +287,9 @@ class DemandPayload(ContractModel):
     quantity_max: float | None = Field(default=None, ge=0)
     unit: str | None = Field(default=None, max_length=64)
     location: str | None = Field(default=None, max_length=255)
-    accepted_conditions: list[str] = Field(default_factory=list, max_length=100)
+    accepted_conditions: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=100
+    )
     required_fields: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator("accepted_conditions", "required_fields")

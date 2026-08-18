@@ -283,7 +283,7 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 Demand 관리 API:
 
 ```text
-GET  /api/v1/demands?include_inactive=false
+GET  /api/v1/demands?include_inactive=false&limit=50&offset=0
 POST /api/v1/demands
 PUT  /api/v1/demands/{demand_id}
 POST /api/v1/demands/{demand_id}/deactivate
@@ -292,6 +292,10 @@ GET  /api/v1/demands/index/events
 ```
 
 읽기는 `VIEWER+`, create/update/deactivate/index sync와 event 조회는 `ADMIN`만 허용합니다. 이 경로들은 `X-Actor`를 무시하고 API principal actor만 기록합니다. 변경 transaction에 durable `demand_index_events`를 먼저 만들고, commit 후 Chroma를 동기화합니다. 실패하면 DB 변경은 보존되고 event가 `FAILED`가 되며 API는 `503 DEMAND_INDEX_UNAVAILABLE`를 반환합니다. 현재는 관리자가 전체 sync로 재처리하며 자동 worker는 후속 범위입니다.
+
+Demand 목록도 `limit` 1~100, `offset`과 `X-Total-Count`/`X-Limit`/`X-Offset`
+header를 지원합니다. 동일한 PUT 또는 이미 비활성인 Demand의 반복 deactivate는 version과
+index event를 불필요하게 늘리지 않습니다.
 
 ## 7. 검증·무결성·동시성
 
@@ -305,6 +309,7 @@ GET  /api/v1/demands/index/events
 - Decision → Match Candidate, Scenario → Decision, Receipt → Decision/Scenario lineage를 FK로 보존합니다.
 - Match 도중 Passport 또는 Demand가 변경되면 PENDING run을 `FAILED`로 남기고 `409`로 재실행을 요구합니다. Candidate의 회사명·설명·Rule 입력·Demand version/hash는 snapshot이므로 이후 Demand 수정이 과거 결과를 바꾸지 않습니다.
 - `APPROVED` 시 선택 Demand가 활성이고 Candidate snapshot과 같은 version/hash인지 다시 확인합니다.
+- 존재하지 않는 경로와 잘못된 HTTP method까지 각각 `404 NOT_FOUND`, `405 METHOD_NOT_ALLOWED` 공통 오류 형식과 trace ID로 반환합니다.
 - DB 장애는 `503 DATABASE_UNAVAILABLE`, Match Provider 장애는 `503 MATCH_UNAVAILABLE`, 예상하지 못한 예외는 stack trace를 숨긴 `500 INTERNAL_ERROR` 공통 형식으로 반환합니다.
 
 ## 8. 데이터·표현 한계

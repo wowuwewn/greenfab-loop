@@ -212,11 +212,22 @@ def read_case(case_id: str, db: DbSession, _principal: ViewerPrincipal) -> CaseE
 
 @api_router.get("/demands", response_model=list[DemandOut])
 def read_demands(
+    response: Response,
     db: DbSession,
     _principal: StrictViewerPrincipal,
     include_inactive: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[DemandOut]:
-    records = list_demands(db, include_inactive=include_inactive)
+    records, total = list_demands(
+        db,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+    )
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Limit"] = str(limit)
+    response.headers["X-Offset"] = str(offset)
     return [DemandOut.model_validate(record) for record in records]
 
 
@@ -258,17 +269,23 @@ def replace_demand(
     principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
-        record = update_demand(db, demand_id, payload)
-        event = create_index_event(
-            db,
-            operation="UPSERT",
-            demand_id=record.demand_id,
-            requested_by=principal.actor,
-            target_version=record.version,
-            target_content_sha256=record.content_sha256,
-            trace_id=_trace_id(request),
-        )
+        record, changed = update_demand(db, demand_id, payload)
         result = DemandOut.model_validate(record)
+        event = (
+            create_index_event(
+                db,
+                operation="UPSERT",
+                demand_id=record.demand_id,
+                requested_by=principal.actor,
+                target_version=record.version,
+                target_content_sha256=record.content_sha256,
+                trace_id=_trace_id(request),
+            )
+            if changed
+            else None
+        )
+    if event is None:
+        return result
     _process_demand_index_event(
         request,
         db,
@@ -287,17 +304,23 @@ def remove_demand_from_matching(
     principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
-        record = deactivate_demand(db, demand_id)
-        event = create_index_event(
-            db,
-            operation="DELETE",
-            demand_id=record.demand_id,
-            requested_by=principal.actor,
-            target_version=record.version,
-            target_content_sha256=record.content_sha256,
-            trace_id=_trace_id(request),
-        )
+        record, changed = deactivate_demand(db, demand_id)
         result = DemandOut.model_validate(record)
+        event = (
+            create_index_event(
+                db,
+                operation="DELETE",
+                demand_id=record.demand_id,
+                requested_by=principal.actor,
+                target_version=record.version,
+                target_content_sha256=record.content_sha256,
+                trace_id=_trace_id(request),
+            )
+            if changed
+            else None
+        )
+    if event is None:
+        return result
     _process_demand_index_event(
         request,
         db,
