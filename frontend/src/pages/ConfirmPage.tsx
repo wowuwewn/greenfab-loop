@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,12 +10,14 @@ import {
   X,
 } from 'lucide-react'
 import { WorkflowStepper } from '../components/WorkflowStepper'
+import { ApiErrorMessage } from '../components/ApiErrorMessage'
+import { toApiError, type ApiError } from '../api/client'
 import {
   DETECT_ANALYSIS,
-  PRIORITY_CASE,
   WORKFLOW_STEPS,
 } from '../data/detectData'
 import type {
+  DetectCase,
   ResourceConfirmation,
   ResourceConfirmationStatus,
 } from '../types/loop'
@@ -23,9 +26,9 @@ import '../confirm.css'
 type ConfirmedStatus = Exclude<ResourceConfirmationStatus, 'PENDING'>
 
 interface ConfirmPageProps {
+  caseData: DetectCase
   resourceConfirmation: ResourceConfirmation
-  onSelect: (status: ConfirmedStatus) => void
-  onReset: () => void
+  onSelect: (status: ConfirmedStatus) => Promise<void>
   onBackToDetect: () => void
   onGoToPassport: () => void
 }
@@ -33,16 +36,34 @@ interface ConfirmPageProps {
 const formatNumber = new Intl.NumberFormat('ko-KR')
 
 export function ConfirmPage({
+  caseData,
   resourceConfirmation,
   onSelect,
-  onReset,
   onBackToDetect,
   onGoToPassport,
 }: ConfirmPageProps) {
   const { status } = resourceConfirmation
+  const [isChoosing, setIsChoosing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [apiError, setApiError] = useState<ApiError | null>(null)
 
   const resetSelection = () => {
-    onReset()
+    setApiError(null)
+    setIsChoosing(true)
+  }
+
+  const selectStatus = async (nextStatus: ConfirmedStatus) => {
+    setIsSaving(true)
+    setApiError(null)
+
+    try {
+      await onSelect(nextStatus)
+      setIsChoosing(false)
+    } catch (error) {
+      setApiError(toApiError(error))
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -84,13 +105,13 @@ export function ConfirmPage({
         <section className="confirm-case" aria-labelledby="confirm-case-title">
           <div className="confirm-case__identity">
             <span>확인 대상</span>
-            <h2 id="confirm-case-title">{PRIORITY_CASE.case_id}</h2>
+            <h2 id="confirm-case-title">{caseData.case_id}</h2>
           </div>
           <dl className="confirm-case__details">
             <div>
               <dt>검토 우선순위</dt>
               <dd>
-                {PRIORITY_CASE.risk_rank}위 /{' '}
+                {caseData.risk_rank ?? '-'}위 /{' '}
                 {formatNumber.format(DETECT_ANALYSIS.total_cases)}건
               </dd>
             </div>
@@ -111,8 +132,8 @@ export function ConfirmPage({
               <strong>모델 분석 결과</strong>
             </div>
             <div className="source-transition__content">
-              <p>{PRIORITY_CASE.case_id}</p>
-              <small>검토 우선순위 {PRIORITY_CASE.risk_rank}위</small>
+              <p>{caseData.case_id}</p>
+              <small>검토 우선순위 {caseData.risk_rank ?? '-'}위</small>
             </div>
           </div>
 
@@ -156,12 +177,13 @@ export function ConfirmPage({
             </span>
           </div>
 
-          {status === 'PENDING' && (
+          {(status === 'PENDING' || isChoosing) && (
             <div className="confirmation-options">
               <button
-                className="confirmation-option confirmation-option--primary"
+                className="confirmation-option confirmation-option--neutral"
                 type="button"
-                onClick={() => onSelect('CONFIRMED')}
+                onClick={() => selectStatus('CONFIRMED')}
+                disabled={isSaving}
               >
                 <span className="confirmation-option__icon" aria-hidden="true">
                   <Check size={18} strokeWidth={2.2} />
@@ -174,7 +196,8 @@ export function ConfirmPage({
               <button
                 className="confirmation-option confirmation-option--neutral"
                 type="button"
-                onClick={() => onSelect('NOT_CONFIRMED')}
+                onClick={() => selectStatus('NOT_CONFIRMED')}
+                disabled={isSaving}
               >
                 <span className="confirmation-option__icon" aria-hidden="true">
                   <X size={18} strokeWidth={2} />
@@ -187,7 +210,9 @@ export function ConfirmPage({
             </div>
           )}
 
-          {status === 'CONFIRMED' && (
+          <ApiErrorMessage error={apiError} />
+
+          {status === 'CONFIRMED' && !isChoosing && (
             <div className="confirmation-result confirmation-result--confirmed">
               <CheckCircle2 size={24} strokeWidth={1.9} aria-hidden="true" />
               <div className="confirmation-result__copy">
@@ -211,7 +236,7 @@ export function ConfirmPage({
             </div>
           )}
 
-          {status === 'NOT_CONFIRMED' && (
+          {status === 'NOT_CONFIRMED' && !isChoosing && (
             <div className="confirmation-result confirmation-result--empty">
               <X size={24} strokeWidth={1.9} aria-hidden="true" />
               <div className="confirmation-result__copy">

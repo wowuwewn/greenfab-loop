@@ -11,9 +11,17 @@ import {
   UserCheck,
 } from 'lucide-react'
 import { WorkflowStepper } from '../components/WorkflowStepper'
+import { ApiErrorMessage } from '../components/ApiErrorMessage'
+import {
+  fieldMatches,
+  toApiError,
+  type ApiError,
+  type ApiFieldError,
+} from '../api/client'
 import { WORKFLOW_STEPS } from '../data/detectData'
 import type {
   Decision,
+  DecisionDraft,
   DecisionStatus,
   Match,
   MatchCandidate,
@@ -23,7 +31,7 @@ import '../review.css'
 interface ReviewPageProps {
   match: Match | null
   decision: Decision | null
-  onDecisionChange: (decision: Decision) => void
+  onDecisionChange: (decision: DecisionDraft) => Promise<void>
   onBack: () => void
   onGoToReceipt: () => void
 }
@@ -93,6 +101,11 @@ export function ReviewPage({
   const [reason, setReason] = useState(decision?.reason ?? '')
   const [errors, setErrors] = useState<DecisionErrors>({})
   const [isEditing, setIsEditing] = useState(decision === null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [apiError, setApiError] = useState<ApiError | null>(null)
+  const [unmappedFieldErrors, setUnmappedFieldErrors] = useState<
+    ApiFieldError[]
+  >([])
 
   const candidates = match?.candidates ?? []
   const hasCandidates = candidates.length > 0
@@ -114,8 +127,11 @@ export function ReviewPage({
     }))
   }
 
-  const saveDecision = () => {
+  const saveDecision = async () => {
     if (!hasCandidates) return
+
+    setApiError(null)
+    setUnmappedFieldErrors([])
 
     const nextErrors: DecisionErrors = {}
     const trimmedReason = reason.trim()
@@ -138,6 +154,8 @@ export function ReviewPage({
 
     if (!trimmedReason) {
       nextErrors.reason = '결정 사유를 입력해주세요.'
+    } else if (trimmedReason.length < 10) {
+      nextErrors.reason = '결정 사유는 10자 이상 입력해주세요.'
     }
 
     if (Object.keys(nextErrors).length > 0 || !decisionStatus) {
@@ -145,15 +163,40 @@ export function ReviewPage({
       return
     }
 
-    onDecisionChange({
-      status: decisionStatus,
-      selected_demand_id: selectedDemandId,
-      reason: trimmedReason,
-      decided_by: 'demo_reviewer',
-      decided_at: new Date().toISOString(),
-    })
+    setIsSaving(true)
     setErrors({})
-    setIsEditing(false)
+
+    try {
+      await onDecisionChange({
+        status: decisionStatus,
+        selected_demand_id: selectedDemandId,
+        reason: trimmedReason,
+      })
+      setErrors({})
+      setIsEditing(false)
+    } catch (error) {
+      const nextApiError = toApiError(error)
+      const serverErrors: DecisionErrors = {}
+      const unmapped: ApiFieldError[] = []
+
+      nextApiError.fieldErrors.forEach((fieldError) => {
+        if (fieldMatches(fieldError.field, 'reason')) {
+          serverErrors.reason = fieldError.message
+        } else if (fieldMatches(fieldError.field, 'selected_demand_id')) {
+          serverErrors.candidate = fieldError.message
+        } else if (fieldMatches(fieldError.field, 'status')) {
+          serverErrors.status = fieldError.message
+        } else {
+          unmapped.push(fieldError)
+        }
+      })
+
+      setErrors((current) => ({ ...current, ...serverErrors }))
+      setApiError(nextApiError)
+      setUnmappedFieldErrors(unmapped)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const editDecision = () => {
@@ -161,6 +204,8 @@ export function ReviewPage({
     setDecisionStatus(decision?.status ?? null)
     setReason(decision?.reason ?? '')
     setErrors({})
+    setApiError(null)
+    setUnmappedFieldErrors([])
     setIsEditing(true)
   }
 
@@ -176,7 +221,7 @@ export function ReviewPage({
           </a>
           <button className="overview-back-button" type="button" onClick={onBack}>
             <ArrowLeft size={16} strokeWidth={1.8} aria-hidden="true" />
-            자원 정보로 돌아가기
+            후보 탐색으로 돌아가기
           </button>
         </div>
       </header>
@@ -238,6 +283,7 @@ export function ReviewPage({
                       key={candidate.demand_id}
                       onClick={() => selectCandidate(candidate)}
                       aria-pressed={isSelected}
+                      disabled={isSaving}
                     >
                       <div className="candidate-row__topline">
                         <span>{index + 1}순위</span>
@@ -322,6 +368,10 @@ export function ReviewPage({
               </div>
             ) : (
               <div className={`decision-form${hasCandidates ? '' : ' is-disabled'}`}>
+                <ApiErrorMessage
+                  error={apiError}
+                  fieldErrors={unmappedFieldErrors}
+                />
                 <div className="selected-candidate-summary">
                   <span>선택 후보</span>
                   {selectedCandidate ? (
@@ -346,7 +396,7 @@ export function ReviewPage({
                         type="button"
                         key={status}
                         onClick={() => selectDecisionStatus(status)}
-                        disabled={!hasCandidates}
+                        disabled={!hasCandidates || isSaving}
                       >
                         {decisionLabels[status]}
                       </button>
@@ -366,7 +416,7 @@ export function ReviewPage({
                       setReason(event.target.value)
                       setErrors((current) => ({ ...current, reason: undefined }))
                     }}
-                    disabled={!hasCandidates}
+                    disabled={!hasCandidates || isSaving}
                     aria-invalid={Boolean(errors.reason)}
                   />
                   {errors.reason && (
@@ -374,8 +424,13 @@ export function ReviewPage({
                   )}
                 </label>
 
-                <button className="primary-button review-save-button" type="button" onClick={saveDecision} disabled={!hasCandidates}>
-                  결정 저장
+                <button
+                  className="primary-button review-save-button"
+                  type="button"
+                  onClick={saveDecision}
+                  disabled={!hasCandidates || isSaving}
+                >
+                  {isSaving ? '결정을 저장하고 있습니다...' : '결정 저장'}
                   <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
                 </button>
 

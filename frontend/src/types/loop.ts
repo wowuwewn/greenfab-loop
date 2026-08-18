@@ -35,6 +35,15 @@ export interface ResourcePassport {
   source_type: SourceType
 }
 
+export interface ResourcePassportDraft {
+  description: string
+  quantity: number | null
+  unit: string | null
+  condition: string | null
+  location: string | null
+  composition: string | null
+}
+
 export interface RuleCheck {
   quantity: boolean | null
   required_info: boolean | null
@@ -53,10 +62,18 @@ export interface MatchCandidate {
   status: MatchCandidateStatus
 }
 
+export interface RulePolicyLineage {
+  policy_key: string
+  version: number
+  definition_sha256: string
+}
+
 export interface Match {
   model: string
+  model_revision: string | null
   created_at: string | null
   source_type: SourceType
+  rule_policy: RulePolicyLineage
   candidates: MatchCandidate[]
 }
 
@@ -65,9 +82,15 @@ export type DecisionStatus = 'APPROVED' | 'HOLD' | 'REJECTED'
 export interface Decision {
   status: DecisionStatus
   selected_demand_id: string | null
-  reason: string | null
+  reason: string
   decided_by: string
   decided_at: string
+}
+
+export interface DecisionDraft {
+  status: DecisionStatus
+  selected_demand_id: string | null
+  reason: string
 }
 
 export interface EsgScenarioInputs {
@@ -104,6 +127,34 @@ export interface Receipt {
   decision_status: DecisionStatus
   handoff_status: ReceiptHandoffStatus
   created_at: string
+}
+
+export interface BackendEsgScenario {
+  source_type: SourceType
+  inputs: Record<string, unknown>
+  results: Record<string, unknown>
+  formula_version: string | null
+  factor_source: string | null
+}
+
+export interface BackendReceipt {
+  receipt_id: string
+  case_id: string
+  passport_id: string
+  selected_demand_id: string | null
+  decision_status: DecisionStatus
+  handoff_status: string
+  created_at: string | null
+}
+
+export interface CaseEnvelope {
+  case: DetectCase
+  resource_confirmation: ResourceConfirmation
+  resource_passport: ResourcePassport | null
+  match: Match | null
+  decision: Decision | null
+  esg_scenario: BackendEsgScenario | null
+  receipt: BackendReceipt | null
 }
 
 export interface DetectAnalysis {

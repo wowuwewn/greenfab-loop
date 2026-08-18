@@ -1,18 +1,24 @@
 import { useState } from 'react'
-import { DetectPage } from './pages/DetectPage'
+import {
+  confirmResource,
+  resetDemo,
+  runMatch,
+  saveDecision,
+  saveResourcePassport,
+} from './api/greenfabApi'
 import { ConfirmPage } from './pages/ConfirmPage'
+import { DetectPage } from './pages/DetectPage'
+import { MatchPage } from './pages/MatchPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { PassportPage } from './pages/PassportPage'
-import { ReviewPage } from './pages/ReviewPage'
 import { ReceiptPage } from './pages/ReceiptPage'
-import { PRIORITY_CASE, RESOURCE_CONFIRMATION } from './data/detectData'
+import { ReviewPage } from './pages/ReviewPage'
 import type {
-  Decision,
+  CaseEnvelope,
+  DecisionDraft,
   EsgScenario,
-  Match,
   Receipt,
-  ResourceConfirmation,
-  ResourcePassport,
+  ResourcePassportDraft,
 } from './types/loop'
 
 type AppView =
@@ -20,17 +26,13 @@ type AppView =
   | 'detect'
   | 'confirm'
   | 'passport'
+  | 'match'
   | 'review'
   | 'receipt'
 
 function App() {
   const [view, setView] = useState<AppView>('overview')
-  const [resourceConfirmation, setResourceConfirmation] =
-    useState<ResourceConfirmation>({ ...RESOURCE_CONFIRMATION })
-  const [resourcePassport, setResourcePassport] =
-    useState<ResourcePassport | null>(null)
-  const [match, setMatch] = useState<Match | null>(null)
-  const [decision, setDecision] = useState<Decision | null>(null)
+  const [caseEnvelope, setCaseEnvelope] = useState<CaseEnvelope | null>(null)
   const [esgScenario, setEsgScenario] = useState<EsgScenario | null>(null)
   const [receipt, setReceipt] = useState<Receipt | null>(null)
 
@@ -39,10 +41,25 @@ function App() {
     setView(nextView)
   }
 
+  const startDemo = async () => {
+    const response = await resetDemo()
+    setCaseEnvelope(response)
+    setEsgScenario(null)
+    setReceipt(null)
+    changeView('detect')
+  }
+
+  if (view === 'overview' || !caseEnvelope) {
+    return <OverviewPage onStartDemo={startDemo} />
+  }
+
+  const caseId = caseEnvelope.case.case_id
+
   if (view === 'detect') {
     return (
       <DetectPage
-        resourceConfirmation={resourceConfirmation}
+        caseData={caseEnvelope.case}
+        resourceConfirmation={caseEnvelope.resource_confirmation}
         onBackToOverview={() => changeView('overview')}
         onGoToConfirm={() => changeView('confirm')}
       />
@@ -52,23 +69,17 @@ function App() {
   if (view === 'confirm') {
     return (
       <ConfirmPage
-        resourceConfirmation={resourceConfirmation}
-        onSelect={(status) => {
-          setResourcePassport(null)
-          setResourceConfirmation({
-            status,
-            confirmed_by: 'demo_operator',
-            confirmed_at: new Date().toISOString(),
-            source_type: 'DEMO',
-          })
-        }}
-        onReset={() => {
-          setResourcePassport(null)
-          setResourceConfirmation({ ...RESOURCE_CONFIRMATION })
+        caseData={caseEnvelope.case}
+        resourceConfirmation={caseEnvelope.resource_confirmation}
+        onSelect={async (status) => {
+          const response = await confirmResource(caseId, status)
+          setCaseEnvelope(response)
+          setEsgScenario(null)
+          setReceipt(null)
         }}
         onBackToDetect={() => changeView('detect')}
         onGoToPassport={() => {
-          if (resourceConfirmation.status === 'CONFIRMED') {
+          if (caseEnvelope.resource_confirmation.status === 'CONFIRMED') {
             changeView('passport')
           }
         }}
@@ -79,16 +90,33 @@ function App() {
   if (view === 'passport') {
     return (
       <PassportPage
-        resourceConfirmation={resourceConfirmation}
-        resourcePassport={resourcePassport}
-        onSave={(passport) => {
-          setResourcePassport(passport)
-          setMatch(null)
-          setDecision(null)
+        caseData={caseEnvelope.case}
+        resourceConfirmation={caseEnvelope.resource_confirmation}
+        resourcePassport={caseEnvelope.resource_passport}
+        onSave={async (draft: ResourcePassportDraft) => {
+          const response = await saveResourcePassport(caseId, draft)
+          setCaseEnvelope(response)
           setEsgScenario(null)
           setReceipt(null)
         }}
         onBackToConfirm={() => changeView('confirm')}
+        onGoToMatch={() => changeView('match')}
+      />
+    )
+  }
+
+  if (view === 'match') {
+    return (
+      <MatchPage
+        resourcePassport={caseEnvelope.resource_passport}
+        match={caseEnvelope.match}
+        onRunMatch={async () => {
+          const response = await runMatch(caseId)
+          setCaseEnvelope(response)
+          setEsgScenario(null)
+          setReceipt(null)
+        }}
+        onBackToPassport={() => changeView('passport')}
         onGoToReview={() => changeView('review')}
       />
     )
@@ -97,61 +125,46 @@ function App() {
   if (view === 'review') {
     return (
       <ReviewPage
-        match={match}
-        decision={decision}
-        onDecisionChange={(nextDecision) => {
-          setDecision(nextDecision)
+        match={caseEnvelope.match}
+        decision={caseEnvelope.decision}
+        onDecisionChange={async (draft: DecisionDraft) => {
+          const response = await saveDecision(caseId, draft)
+          setCaseEnvelope(response)
           setReceipt(null)
         }}
-        onBack={() => changeView('passport')}
+        onBack={() => changeView('match')}
         onGoToReceipt={() => changeView('receipt')}
       />
     )
   }
 
-  if (view === 'receipt') {
-    return (
-      <ReceiptPage
-        caseData={PRIORITY_CASE}
-        resourceConfirmation={resourceConfirmation}
-        resourcePassport={resourcePassport}
-        match={match}
-        decision={decision}
-        esgScenario={esgScenario}
-        receipt={receipt}
-        onEsgScenarioChange={setEsgScenario}
-        onCreateReceipt={() => {
-          if (!resourcePassport || !decision || !esgScenario) return
-
-          setReceipt({
-            receipt_id: `RECEIPT-${PRIORITY_CASE.case_id}`,
-            case_id: PRIORITY_CASE.case_id,
-            passport_id: resourcePassport.passport_id,
-            selected_demand_id: decision.selected_demand_id,
-            decision_status: decision.status,
-            handoff_status:
-              decision.status === 'APPROVED'
-                ? 'APPROVED'
-                : 'RESOURCE_CONFIRMED',
-            created_at: new Date().toISOString(),
-          })
-        }}
-        onBackToReview={() => changeView('review')}
-      />
-    )
-  }
-
   return (
-    <OverviewPage
-      onStartDemo={() => {
-        setResourceConfirmation({ ...RESOURCE_CONFIRMATION })
-        setResourcePassport(null)
-        setMatch(null)
-        setDecision(null)
-        setEsgScenario(null)
-        setReceipt(null)
-        changeView('detect')
+    <ReceiptPage
+      caseData={caseEnvelope.case}
+      resourceConfirmation={caseEnvelope.resource_confirmation}
+      resourcePassport={caseEnvelope.resource_passport}
+      match={caseEnvelope.match}
+      decision={caseEnvelope.decision}
+      esgScenario={esgScenario}
+      receipt={receipt}
+      onEsgScenarioChange={setEsgScenario}
+      onCreateReceipt={() => {
+        const resourcePassport = caseEnvelope.resource_passport
+        const decision = caseEnvelope.decision
+        if (!resourcePassport || !decision || !esgScenario) return
+
+        setReceipt({
+          receipt_id: `RECEIPT-${caseEnvelope.case.case_id}`,
+          case_id: caseEnvelope.case.case_id,
+          passport_id: resourcePassport.passport_id,
+          selected_demand_id: decision.selected_demand_id,
+          decision_status: decision.status,
+          handoff_status:
+            decision.status === 'APPROVED' ? 'APPROVED' : 'RESOURCE_CONFIRMED',
+          created_at: new Date().toISOString(),
+        })
       }}
+      onBackToReview={() => changeView('review')}
     />
   )
 }

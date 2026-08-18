@@ -8,16 +8,29 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { WorkflowStepper } from '../components/WorkflowStepper'
-import { PRIORITY_CASE, WORKFLOW_STEPS } from '../data/detectData'
-import type { ResourceConfirmation, ResourcePassport } from '../types/loop'
+import { ApiErrorMessage } from '../components/ApiErrorMessage'
+import {
+  fieldMatches,
+  toApiError,
+  type ApiError,
+  type ApiFieldError,
+} from '../api/client'
+import { WORKFLOW_STEPS } from '../data/detectData'
+import type {
+  DetectCase,
+  ResourceConfirmation,
+  ResourcePassport,
+  ResourcePassportDraft,
+} from '../types/loop'
 import '../passport.css'
 
 interface PassportPageProps {
+  caseData: DetectCase
   resourceConfirmation: ResourceConfirmation
   resourcePassport: ResourcePassport | null
-  onSave: (resourcePassport: ResourcePassport) => void
+  onSave: (resourcePassport: ResourcePassportDraft) => Promise<void>
   onBackToConfirm: () => void
-  onGoToReview: () => void
+  onGoToMatch: () => void
 }
 
 interface PassportFormValues {
@@ -34,8 +47,6 @@ interface PassportFormErrors {
   quantity?: string
   unit?: string
 }
-
-const PASSPORT_ID = 'PASSPORT-DEMO-0116'
 
 const toFormValues = (
   resourcePassport: ResourcePassport | null,
@@ -55,19 +66,23 @@ const toFormValues = (
 const optionalText = (value: string) => value.trim() || null
 
 export function PassportPage({
+  caseData,
   resourceConfirmation,
   resourcePassport,
   onSave,
   onBackToConfirm,
-  onGoToReview,
+  onGoToMatch,
 }: PassportPageProps) {
   const [formValues, setFormValues] = useState<PassportFormValues>(() =>
     toFormValues(resourcePassport),
   )
   const [errors, setErrors] = useState<PassportFormErrors>({})
-  const [hasSubmitted, setHasSubmitted] = useState(false)
   const [isEditing, setIsEditing] = useState(resourcePassport === null)
-  const [showMatchNotice, setShowMatchNotice] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [apiError, setApiError] = useState<ApiError | null>(null)
+  const [unmappedFieldErrors, setUnmappedFieldErrors] = useState<
+    ApiFieldError[]
+  >([])
 
   const updateField = (field: keyof PassportFormValues, value: string) => {
     setFormValues((current) => ({ ...current, [field]: value }))
@@ -84,9 +99,10 @@ export function PassportPage({
     }
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setHasSubmitted(true)
+    setApiError(null)
+    setUnmappedFieldErrors([])
 
     const nextErrors: PassportFormErrors = {}
     const description = formValues.description.trim()
@@ -119,27 +135,50 @@ export function PassportPage({
       return
     }
 
-    onSave({
-      passport_id: PASSPORT_ID,
-      description,
-      quantity,
-      unit: unit || null,
-      condition: optionalText(formValues.condition),
-      location: optionalText(formValues.location),
-      composition: optionalText(formValues.composition),
-      source_type: 'DEMO',
-    })
+    setIsSaving(true)
     setErrors({})
-    setHasSubmitted(false)
-    setShowMatchNotice(false)
-    setIsEditing(false)
+
+    try {
+      await onSave({
+        description,
+        quantity,
+        unit: unit || null,
+        condition: optionalText(formValues.condition),
+        location: optionalText(formValues.location),
+        composition: optionalText(formValues.composition),
+      })
+      setErrors({})
+      setIsEditing(false)
+    } catch (error) {
+      const nextApiError = toApiError(error)
+      const serverErrors: PassportFormErrors = {}
+      const unmapped: ApiFieldError[] = []
+
+      nextApiError.fieldErrors.forEach((fieldError) => {
+        if (fieldMatches(fieldError.field, 'description')) {
+          serverErrors.description = fieldError.message
+        } else if (fieldMatches(fieldError.field, 'quantity')) {
+          serverErrors.quantity = fieldError.message
+        } else if (fieldMatches(fieldError.field, 'unit')) {
+          serverErrors.unit = fieldError.message
+        } else {
+          unmapped.push(fieldError)
+        }
+      })
+
+      setErrors((current) => ({ ...current, ...serverErrors }))
+      setApiError(nextApiError)
+      setUnmappedFieldErrors(unmapped)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const startEditing = () => {
     setFormValues(toFormValues(resourcePassport))
     setErrors({})
-    setHasSubmitted(false)
-    setShowMatchNotice(false)
+    setApiError(null)
+    setUnmappedFieldErrors([])
     setIsEditing(true)
   }
 
@@ -185,7 +224,7 @@ export function PassportPage({
         <section className="passport-context" aria-label="자원 정보 연결 맥락">
           <div>
             <span>연결된 생산 건</span>
-            <strong>{PRIORITY_CASE.case_id}</strong>
+            <strong>{caseData.case_id}</strong>
           </div>
           <div>
             <span>현장 확인</span>
@@ -240,17 +279,25 @@ export function PassportPage({
 
             {isEditing ? (
               <form className="passport-form" onSubmit={handleSubmit} noValidate>
+                {apiError && (
+                  <div className="passport-field--full">
+                    <ApiErrorMessage
+                      error={apiError}
+                      fieldErrors={unmappedFieldErrors}
+                    />
+                  </div>
+                )}
                 <label className="passport-field passport-field--full">
                   <span>자원 설명 <em className="is-required">필수</em></span>
                   <textarea
                     value={formValues.description}
                     onChange={(event) => updateField('description', event.target.value)}
-                    aria-invalid={hasSubmitted && Boolean(errors.description)}
+                    aria-invalid={Boolean(errors.description)}
                     aria-describedby="description-helper description-error"
                     rows={3}
                   />
                   <small id="description-helper">AI 후보 탐색에 사용할 자원 설명입니다.</small>
-                  {hasSubmitted && errors.description && (
+                  {errors.description && (
                     <strong className="passport-field__error" id="description-error">
                       {errors.description}
                     </strong>
@@ -265,10 +312,10 @@ export function PassportPage({
                     step="any"
                     value={formValues.quantity}
                     onChange={(event) => updateField('quantity', event.target.value)}
-                    aria-invalid={hasSubmitted && Boolean(errors.quantity)}
+                    aria-invalid={Boolean(errors.quantity)}
                     aria-describedby="quantity-error"
                   />
-                  {hasSubmitted && errors.quantity && (
+                  {errors.quantity && (
                     <strong className="passport-field__error" id="quantity-error">
                       {errors.quantity}
                     </strong>
@@ -282,10 +329,10 @@ export function PassportPage({
                     placeholder="예: kg"
                     value={formValues.unit}
                     onChange={(event) => updateField('unit', event.target.value)}
-                    aria-invalid={hasSubmitted && Boolean(errors.unit)}
+                    aria-invalid={Boolean(errors.unit)}
                     aria-describedby="unit-error"
                   />
-                  {hasSubmitted && errors.unit && (
+                  {errors.unit && (
                     <strong className="passport-field__error" id="unit-error">
                       {errors.unit}
                     </strong>
@@ -322,8 +369,12 @@ export function PassportPage({
                 </label>
 
                 <div className="passport-form__actions passport-field--full">
-                  <button className="primary-button passport-save-button" type="submit">
-                    자원 정보 저장
+                  <button
+                    className="primary-button passport-save-button"
+                    type="submit"
+                    disabled={isSaving}
+                  >
+                    {isSaving ? '자원 정보를 저장하고 있습니다...' : '자원 정보 저장'}
                     <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
                   </button>
                 </div>
@@ -370,7 +421,7 @@ export function PassportPage({
                     <button
                       className="primary-button passport-match-button"
                       type="button"
-                      onClick={() => setShowMatchNotice(true)}
+                      onClick={onGoToMatch}
                     >
                       후보 탐색으로 이동
                       <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
@@ -381,23 +432,6 @@ export function PassportPage({
                     </button>
                   </div>
 
-                  <div
-                    className={`inline-notice passport-inline-notice${showMatchNotice ? ' is-visible' : ''}`}
-                    aria-live="polite"
-                  >
-                    <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
-                    <span>후보 탐색 화면은 다음 단계에서 연결됩니다.</span>
-                  </div>
-
-                  {import.meta.env.DEV && (
-                    <div className="passport-dev-preview">
-                      <small>개발용 미리보기 · 실제 서비스 흐름에서는 후보 탐색 후 이동합니다.</small>
-                      <button className="secondary-button" type="button" onClick={onGoToReview}>
-                        최종 검토 화면 미리보기
-                        <ArrowRight size={16} strokeWidth={1.9} aria-hidden="true" />
-                      </button>
-                    </div>
-                  )}
                 </div>
               )
             )}

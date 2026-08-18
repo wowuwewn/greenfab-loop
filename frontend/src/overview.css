@@ -97,6 +97,18 @@
   transform: translateY(-2px);
 }
 
+.overview-cta:disabled,
+.overview-cta:disabled:hover {
+  box-shadow: none;
+  opacity: 0.62;
+  cursor: wait;
+  transform: none;
+}
+
+.overview-cta:disabled:hover svg {
+  transform: none;
+}
+
 .overview-cta svg {
   transition: transform 180ms ease;
 }
