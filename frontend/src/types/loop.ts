@@ -1,5 +1,17 @@
 export type SourceType = 'REAL' | 'DEMO' | 'SCENARIO'
 
+export type WorkflowStatus =
+  | 'DETECTED'
+  | 'CONFIRMATION_PENDING'
+  | 'RESOURCE_CONFIRMED'
+  | 'PASSPORT_READY'
+  | 'MATCH_READY'
+  | 'DECIDED'
+  | 'SCENARIO_READY'
+  | 'RECEIPT_CREATED'
+  | 'NOT_CONFIRMED'
+  | 'CLOSED'
+
 export type ResourceConfirmationStatus =
   | 'PENDING'
   | 'CONFIRMED'
@@ -33,15 +45,6 @@ export interface ResourcePassport {
   location: string | null
   composition: string | null
   source_type: SourceType
-}
-
-export interface ResourcePassportDraft {
-  description: string
-  quantity: number | null
-  unit: string | null
-  condition: string | null
-  location: string | null
-  composition: string | null
 }
 
 export interface RuleCheck {
@@ -87,37 +90,29 @@ export interface Decision {
   decided_at: string
 }
 
-export interface DecisionDraft {
-  status: DecisionStatus
-  selected_demand_id: string | null
-  reason: string
-}
-
 export interface EsgScenarioInputs {
-  scenario_quantity_kg: number
-  baseline_pathway: string
-  alternative_pathway: string
-  baseline_energy_factor_kwh_per_kg: number | null
-  alternative_energy_factor_kwh_per_kg: number | null
-  baseline_carbon_factor_kgco2e_per_kg: number | null
-  alternative_carbon_factor_kgco2e_per_kg: number | null
+  resource_quantity: number | null
+  unit: string | null
+  decision_status: DecisionStatus
 }
 
 export interface EsgScenarioResults {
-  diverted_quantity_kg: number
-  energy_difference_kwh: number | null
-  carbon_difference_kgco2e: number | null
+  candidate_diversion_quantity: number | null
+  unit: string | null
 }
 
 export interface EsgScenario {
   source_type: 'SCENARIO'
   inputs: EsgScenarioInputs
   results: EsgScenarioResults
-  formula_version: 'ESG-SCENARIO-v0.1'
+  formula_version: string | null
   factor_source: string | null
 }
 
-export type ReceiptHandoffStatus = 'RESOURCE_CONFIRMED' | 'APPROVED'
+export type ReceiptHandoffStatus =
+  | 'RESOURCE_CONFIRMED'
+  | 'APPROVED'
+  | 'HANDOFF_CONFIRMED'
 
 export interface Receipt {
   receipt_id: string
@@ -126,35 +121,7 @@ export interface Receipt {
   selected_demand_id: string | null
   decision_status: DecisionStatus
   handoff_status: ReceiptHandoffStatus
-  created_at: string
-}
-
-export interface BackendEsgScenario {
-  source_type: SourceType
-  inputs: Record<string, unknown>
-  results: Record<string, unknown>
-  formula_version: string | null
-  factor_source: string | null
-}
-
-export interface BackendReceipt {
-  receipt_id: string
-  case_id: string
-  passport_id: string
-  selected_demand_id: string | null
-  decision_status: DecisionStatus
-  handoff_status: string
   created_at: string | null
-}
-
-export interface CaseEnvelope {
-  case: DetectCase
-  resource_confirmation: ResourceConfirmation
-  resource_passport: ResourcePassport | null
-  match: Match | null
-  decision: Decision | null
-  esg_scenario: BackendEsgScenario | null
-  receipt: BackendReceipt | null
 }
 
 export interface DetectAnalysis {
@@ -176,4 +143,65 @@ export interface ValidationMetrics {
 export interface WorkflowStep {
   id: string
   label: string
+}
+
+export interface CaseSummary {
+  case_id: string
+  risk_rank: number | null
+  source_type: SourceType
+  workflow_status: WorkflowStatus
+  updated_at: string
+}
+
+export interface CaseEnvelope {
+  case: DetectCase
+  resource_confirmation: ResourceConfirmation
+  resource_passport: ResourcePassport | null
+  match: Match | null
+  decision: Decision | null
+  esg_scenario: EsgScenario | null
+  receipt: Receipt | null
+}
+
+export interface ResourceConfirmationRequest {
+  status: Exclude<ResourceConfirmationStatus, 'PENDING'>
+  confirmed_by: string
+}
+
+export interface ResourcePassportRequest {
+  description: string
+  quantity: number | null
+  unit: string | null
+  condition: string | null
+  location: string | null
+  composition: string | null
+}
+
+export type ResourcePassportDraft = ResourcePassportRequest
+
+export interface MatchRequest {
+  top_k: 1 | 2 | 3
+}
+
+export interface DecisionRequest {
+  status: DecisionStatus
+  selected_demand_id: string | null
+  reason: string
+  decided_by: string
+}
+
+export type DecisionDraft = Omit<DecisionRequest, 'decided_by'>
+
+export interface ApiFieldError {
+  field: string
+  message: string
+}
+
+export interface ApiErrorBody {
+  error: {
+    code: string
+    message: string
+    field_errors: ApiFieldError[]
+    trace_id: string
+  }
 }

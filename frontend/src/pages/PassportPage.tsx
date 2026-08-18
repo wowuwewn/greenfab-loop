@@ -238,7 +238,11 @@ export function PassportPage({
           <div>
             <span>데이터 구분</span>
             <p>
-              <span className="source-badge source-badge--real">REAL</span>
+              <span
+                className={`source-badge source-badge--${caseData.source_type.toLowerCase()}`}
+              >
+                {caseData.source_type}
+              </span>
               생산 Case
               <span className="passport-context__divider" aria-hidden="true" />
               <span className="source-badge source-badge--demo">DEMO</span>
