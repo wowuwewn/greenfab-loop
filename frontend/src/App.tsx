@@ -121,7 +121,7 @@ function App() {
         receipt={receipt}
         onEsgScenarioChange={setEsgScenario}
         onCreateReceipt={() => {
-          if (!resourcePassport || !decision) return
+          if (!resourcePassport || !decision || !esgScenario) return
 
           setReceipt({
             receipt_id: `RECEIPT-${PRIORITY_CASE.case_id}`,

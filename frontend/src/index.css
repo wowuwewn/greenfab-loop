@@ -625,6 +625,74 @@ ol {
   font-weight: 450;
 }
 
+.priority-shap {
+  margin-top: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #dce8df;
+}
+
+.priority-shap__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.priority-shap__heading > span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.priority-shap__heading > small {
+  color: var(--color-green-dark);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.priority-shap dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.priority-shap dl > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+.priority-shap dt,
+.priority-shap dd {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.priority-shap dt {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.priority-shap dd {
+  flex: 0 0 auto;
+  color: var(--color-green-dark);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.priority-shap > p {
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
 .action-details {
   display: grid;
   grid-template-columns: 1fr 1.1fr;

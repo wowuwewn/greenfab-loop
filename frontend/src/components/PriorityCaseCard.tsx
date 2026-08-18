@@ -13,6 +13,8 @@ interface PriorityCaseCardProps {
 }
 
 const formatNumber = new Intl.NumberFormat('ko-KR')
+const formatShapValue = (value: number) =>
+  `${value >= 0 ? '+' : ''}${value.toFixed(3)}`
 
 export function PriorityCaseCard({
   analysis,
@@ -35,6 +37,28 @@ export function PriorityCaseCard({
           <small> / {formatNumber.format(analysis.total_cases)}건</small>
         </strong>
       </div>
+
+      {priorityCase.shap_top_features &&
+        priorityCase.shap_top_features.length > 0 && (
+          <div className="priority-shap">
+            <div className="priority-shap__heading">
+              <span>예측에 영향을 준 변수</span>
+              <small>REAL · SHAP</small>
+            </div>
+            <dl>
+              {priorityCase.shap_top_features.map((feature) => (
+                <div key={feature.feature_name}>
+                  <dt>{feature.feature_name}</dt>
+                  <dd>{formatShapValue(feature.shap_value)}</dd>
+                </div>
+              ))}
+            </dl>
+            <p>
+              모델 예측에 대한 기여도이며, 실제 공정 원인이나 인과관계를
+              의미하지 않습니다.
+            </p>
+          </div>
+        )}
 
       <div className="action-details">
         <div>
