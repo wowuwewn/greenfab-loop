@@ -69,6 +69,22 @@ alembic upgrade head
 alembic current
 ```
 
+GitHub의 `Backend CI` workflow는 Python 3.12와 PostgreSQL 16에서 다음 품질
+게이트를 자동 실행합니다.
+
+- core + development dependency만 설치한 테스트와 Ruff 검사
+- `upgrade -> check -> downgrade -> re-upgrade` migration 왕복 검증
+- 기본 및 `match` profile의 Docker Compose 구성 검증
+- 실행 중인 FastAPI/PostgreSQL을 통과하는 Golden Workflow smoke test
+
+CI는 `MATCH_PROVIDER=mock`과 offline 환경을 강제하며 `.[match]` extra를 설치하지
+않습니다. 따라서 4.59GB BGE-M3 가중치를 내려받지 않습니다. 선택형 Chroma smoke는
+로컬에서 `python -m pip install -e ".[dev,match]"` 후 다음처럼 별도로 실행합니다.
+
+```bash
+pytest -m requires_match_runtime
+```
+
 새 schema 변경은 모델과 migration을 함께 수정합니다.
 
 ```bash

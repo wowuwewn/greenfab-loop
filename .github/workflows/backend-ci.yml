@@ -1,0 +1,132 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches: [dev, main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+  # CI intentionally verifies the core/mock boundary. It must never download the 4.59 GB model.
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+
+jobs:
+  backend-quality:
+    name: Core, PostgreSQL 16, and migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: greenfab_ci
+          POSTGRES_USER: greenfab_ci
+          POSTGRES_PASSWORD: greenfab_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U greenfab_ci -d greenfab_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://greenfab_ci:greenfab_ci_only@127.0.0.1:5432/greenfab_ci
+      ENVIRONMENT: test
+      DEMO_MODE: "true"
+      SEED_DEMO_DATA: "true"
+      DEMO_RESET_ENABLED: "false"
+      AUTH_MODE: demo
+      API_KEY_CREDENTIALS: "[]"
+      CORS_ORIGINS: '["http://localhost:5173"]'
+      EVIDENCE_STORAGE_ROOT: /tmp/greenfab-evidence
+      MATCH_PROVIDER: mock
+      DEMAND_INDEX_SYNC_ON_STARTUP: "false"
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install core and development dependencies
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip check
+
+      - name: Run core tests without the optional match runtime
+        run: pytest --strict-markers -m "not requires_match_runtime"
+
+      - name: Run Ruff lint
+        run: ruff check .
+
+      - name: Check Ruff formatting
+        run: ruff format --check .
+
+      - name: Validate Docker Compose definitions
+        run: |
+          docker compose config --quiet
+          docker compose --profile match config --quiet
+
+      - name: Exercise PostgreSQL migrations
+        run: |
+          alembic upgrade head
+          alembic check
+          alembic downgrade -1
+          alembic upgrade head
+          alembic current --check-heads
+          alembic check
+
+      - name: Run the live PostgreSQL Golden Workflow
+        run: |
+          api_log="${RUNNER_TEMP}/greenfab-api.log"
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 >"${api_log}" 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill "${api_pid}" 2>/dev/null || true
+            wait "${api_pid}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health/ready >/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "${api_pid}" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${ready}" != "true" ]]; then
+            cat "${api_log}"
+            exit 1
+          fi
+
+          python scripts/postgres_smoke.py

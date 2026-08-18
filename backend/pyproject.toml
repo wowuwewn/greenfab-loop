@@ -36,6 +36,9 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "requires_match_runtime: needs the optional Chroma runtime; CI core tests exclude it",
+]
 
 [tool.ruff]
 line-length = 100
