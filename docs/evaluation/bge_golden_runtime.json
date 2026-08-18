@@ -1,0 +1,110 @@
+{
+  "verified_at": "2026-08-18T15:55:00Z",
+  "runtime": {
+    "provider": "BgeChromaMatchProvider",
+    "model_name": "BAAI/bge-m3",
+    "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "device": "cpu",
+    "chroma_mode": "persistent",
+    "chroma_collection_count": 3,
+    "database": "isolated SQLite per run"
+  },
+  "data_scope": {
+    "passport": "synthetic DEMO",
+    "demand_profiles": "synthetic DEMO",
+    "notice": "semantic_similarity는 문장 의미의 가까움 정도이며 산업 적합도, 안전성 또는 재활용 성공 확률이 아닙니다."
+  },
+  "health_ready": {
+    "status": "ready",
+    "database": "ok",
+    "match_provider": "BgeChromaMatchProvider",
+    "evidence_storage": "LocalEvidenceStorage"
+  },
+  "match": {
+    "case_id": "SECOM-0116",
+    "source_type": "DEMO",
+    "model": "BAAI/bge-m3",
+    "model_revision_prefix": "BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181",
+    "candidates": [
+      {
+        "rank": 1,
+        "demand_id": "D01",
+        "company_name": "제주 세라믹랩",
+        "semantic_similarity": 0.5420345193280146,
+        "quantity_rule": true,
+        "required_info_rule": true,
+        "location_rule": null,
+        "status": "REVIEW"
+      },
+      {
+        "rank": 2,
+        "demand_id": "D15",
+        "company_name": "시멘트서큘러랩",
+        "semantic_similarity": 0.5356498102042221,
+        "quantity_rule": null,
+        "required_info_rule": true,
+        "location_rule": null,
+        "status": "REVIEW"
+      },
+      {
+        "rank": 3,
+        "demand_id": "D11",
+        "company_name": "제주메탈리턴",
+        "semantic_similarity": 0.5134142847590919,
+        "quantity_rule": null,
+        "required_info_rule": true,
+        "location_rule": null,
+        "status": "REVIEW"
+      }
+    ]
+  },
+  "repeatability": {
+    "runs": 3,
+    "all_passed": true,
+    "same_top3_and_scores": true,
+    "per_run_http_statuses": [
+      {
+        "health_ready": 200,
+        "demo_reset": 200,
+        "resource_confirmation": 200,
+        "resource_passport": 200,
+        "match": 200,
+        "decision": 200,
+        "esg_scenario": 200,
+        "receipt": 200,
+        "receipt_verify": 200
+      },
+      {
+        "health_ready": 200,
+        "demo_reset": 200,
+        "resource_confirmation": 200,
+        "resource_passport": 200,
+        "match": 200,
+        "decision": 200,
+        "esg_scenario": 200,
+        "receipt": 200,
+        "receipt_verify": 200
+      },
+      {
+        "health_ready": 200,
+        "demo_reset": 200,
+        "resource_confirmation": 200,
+        "resource_passport": 200,
+        "match": 200,
+        "decision": 200,
+        "esg_scenario": 200,
+        "receipt": 200,
+        "receipt_verify": 200
+      }
+    ],
+    "receipt_verify_matches_snapshot": [true, true, true]
+  },
+  "execution_trace_per_run": {
+    "sentence_transformer_encode_calls": 2,
+    "encoded_text_count": 4,
+    "chroma_query_calls": 1,
+    "explanation": "Demand 3건 startup upsert와 Passport query 1건을 실제 encode하고 Chroma adapter search를 1회 호출했습니다."
+  },
+  "mock_fixed_snapshot_values": [0.649156, 0.629172, 0.60239],
+  "mock_fallback_occurred": false
+}

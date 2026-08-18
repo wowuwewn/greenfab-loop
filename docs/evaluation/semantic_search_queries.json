@@ -1,0 +1,36 @@
+{
+  "scope": "합성 DEMO query 기반 소규모 기능 검증",
+  "notice": "실제 산업 성능 평가가 아니며 표본 수가 작아 일반화된 성능을 주장할 수 없습니다.",
+  "queries": [
+    {
+      "query_id": "Q01",
+      "text": "실리카 기반 미세 고형물을 세라믹 복합 소재 연구용 소량 배치로 전달",
+      "expected_demand_id": "D01"
+    },
+    {
+      "query_id": "Q02",
+      "text": "세정 공정에서 회수한 규소 성분 분말 12kg을 시험 재료로 활용",
+      "expected_demand_id": "D01"
+    },
+    {
+      "query_id": "Q03",
+      "text": "석회질 고형 부산물을 고온 공정의 보조 투입재로 검토",
+      "expected_demand_id": "D15"
+    },
+    {
+      "query_id": "Q04",
+      "text": "칼슘 성분이 많은 건조 침전물을 유해성 확인 후 시멘트 원료 시험에 사용",
+      "expected_demand_id": "D15"
+    },
+    {
+      "query_id": "Q05",
+      "text": "기름기를 제거한 알루미늄 가공 잔재를 다시 녹이는 원료로 사용",
+      "expected_demand_id": "D11"
+    },
+    {
+      "query_id": "Q06",
+      "text": "합금 조각과 경량 금속 절삭칩을 재용해 공정에 공급",
+      "expected_demand_id": "D11"
+    }
+  ]
+}

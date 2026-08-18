@@ -1,0 +1,107 @@
+{
+  "evaluated_at": "2026-08-18T12:05:17.0431365Z",
+  "scope": "합성 DEMO query 기반 소규모 기능 검증",
+  "notice": "실제 산업 성능 평가가 아니며 표본 수가 6개로 매우 작아 일반화된 성능을 주장할 수 없습니다.",
+  "bge": {
+    "model": "BAAI/bge-m3",
+    "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "device": "cpu",
+    "top_1_hits": 6,
+    "top_1_accuracy": 1.0,
+    "hit_at_3_count": 6,
+    "hit_at_3": 1.0
+  },
+  "tfidf": {
+    "baseline": "word unigram TF-IDF fitted on the three DEMO Demand descriptions",
+    "top_1_hits": 5,
+    "top_1_accuracy": 0.8333333333333334,
+    "hit_at_3_count": 6,
+    "hit_at_3": 1.0
+  },
+  "results": [
+    {
+      "query_id": "Q01",
+      "expected_demand_id": "D01",
+      "bge_top3": [
+        {"demand_id": "D01", "score": 0.602751},
+        {"demand_id": "D11", "score": 0.473854},
+        {"demand_id": "D15", "score": 0.443297}
+      ],
+      "tfidf_top3": [
+        {"demand_id": "D01", "score": 0.308607},
+        {"demand_id": "D15", "score": 0.0},
+        {"demand_id": "D11", "score": 0.0}
+      ]
+    },
+    {
+      "query_id": "Q02",
+      "expected_demand_id": "D01",
+      "bge_top3": [
+        {"demand_id": "D01", "score": 0.605729},
+        {"demand_id": "D15", "score": 0.525012},
+        {"demand_id": "D11", "score": 0.463742}
+      ],
+      "tfidf_top3": [
+        {"demand_id": "D01", "score": 0.218218},
+        {"demand_id": "D15", "score": 0.0},
+        {"demand_id": "D11", "score": 0.0}
+      ]
+    },
+    {
+      "query_id": "Q03",
+      "expected_demand_id": "D15",
+      "bge_top3": [
+        {"demand_id": "D15", "score": 0.578189},
+        {"demand_id": "D11", "score": 0.493192},
+        {"demand_id": "D01", "score": 0.439688}
+      ],
+      "tfidf_top3": [
+        {"demand_id": "D15", "score": 0.358306},
+        {"demand_id": "D01", "score": 0.0},
+        {"demand_id": "D11", "score": 0.0}
+      ]
+    },
+    {
+      "query_id": "Q04",
+      "expected_demand_id": "D15",
+      "bge_top3": [
+        {"demand_id": "D15", "score": 0.794157},
+        {"demand_id": "D01", "score": 0.509051},
+        {"demand_id": "D11", "score": 0.456554}
+      ],
+      "tfidf_top3": [
+        {"demand_id": "D15", "score": 0.25336},
+        {"demand_id": "D01", "score": 0.218218},
+        {"demand_id": "D11", "score": 0.0}
+      ]
+    },
+    {
+      "query_id": "Q05",
+      "expected_demand_id": "D11",
+      "bge_top3": [
+        {"demand_id": "D11", "score": 0.582254},
+        {"demand_id": "D15", "score": 0.504504},
+        {"demand_id": "D01", "score": 0.385755}
+      ],
+      "tfidf_top3": [
+        {"demand_id": "D01", "score": 0.173693},
+        {"demand_id": "D11", "score": 0.14155},
+        {"demand_id": "D15", "score": 0.116643}
+      ]
+    },
+    {
+      "query_id": "Q06",
+      "expected_demand_id": "D11",
+      "bge_top3": [
+        {"demand_id": "D11", "score": 0.780336},
+        {"demand_id": "D15", "score": 0.425054},
+        {"demand_id": "D01", "score": 0.422112}
+      ],
+      "tfidf_top3": [
+        {"demand_id": "D11", "score": 0.614922},
+        {"demand_id": "D01", "score": 0.0},
+        {"demand_id": "D15", "score": 0.0}
+      ]
+    }
+  ]
+}
