@@ -132,15 +132,82 @@ Rule Checker는 수량, 필수정보, 위치처럼 코드로 명확히 표현한
 
 ### `esg_scenario`
 
+ESG Scenario는 AI 예측이 아니라 사용자가 입력한 값과 명시된 계산식을 이용한 `SCENARIO` 계산입니다. 계수 기본값을 임의로 만들지 않으며, 계산에 사용한 계수의 출처를 `factor_source`에 기록합니다. 결과가 항상 절감이라고 가정하지 않고, 차이 값이 양수이면 기준 경로 대비 감소, 음수이면 증가, 0이면 변화 없음으로 해석합니다.
+
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
 | `source_type` | string | 반드시 `SCENARIO` |
-| `inputs` | object | 사용자가 입력한 계산값 |
-| `results` | object | 명시된 계산식의 결과 |
-| `formula_version` | string \| null | 계산식 버전 |
-| `factor_source` | string \| null | 사용한 환산계수의 출처 |
+| `inputs` | object | 사용자가 입력한 ESG Scenario 계산값 |
+| `results` | object | `ESG-SCENARIO-v0.1` 계산식의 결과 |
+| `formula_version` | string | 반드시 `ESG-SCENARIO-v0.1` |
+| `factor_source` | string \| null | 사용한 에너지·탄소 계수의 출처. 계수가 없으면 `null` |
 
-`inputs`와 `results` 내부 필드는 ESG 계산식을 확정할 때 추가합니다. 확정되지 않은 값은 만들지 않고 `null` 또는 빈 객체를 사용합니다.
+#### `inputs`
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `scenario_quantity_kg` | number | Scenario 계산 대상 수량(kg) |
+| `baseline_pathway` | string | 비교 기준 경로 |
+| `alternative_pathway` | string | 대안 경로 |
+| `baseline_energy_factor_kwh_per_kg` | number \| null | 기준 경로 에너지 계수(kWh/kg) |
+| `alternative_energy_factor_kwh_per_kg` | number \| null | 대안 경로 에너지 계수(kWh/kg) |
+| `baseline_carbon_factor_kgco2e_per_kg` | number \| null | 기준 경로 탄소 계수(kgCO2e/kg) |
+| `alternative_carbon_factor_kgco2e_per_kg` | number \| null | 대안 경로 탄소 계수(kgCO2e/kg) |
+
+#### `results`
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `diverted_quantity_kg` | number | 대안 경로로 전환해 검토하는 수량(kg) |
+| `energy_difference_kwh` | number \| null | 기준 경로 대비 에너지 차이(kWh). 양수는 감소, 음수는 증가 |
+| `carbon_difference_kgco2e` | number \| null | 기준 경로 대비 탄소 차이(kgCO2e). 양수는 감소, 음수는 증가 |
+
+#### 계산식
+
+```text
+diverted_quantity_kg
+= scenario_quantity_kg
+
+energy_difference_kwh
+= scenario_quantity_kg
+  * (
+      baseline_energy_factor_kwh_per_kg
+      - alternative_energy_factor_kwh_per_kg
+    )
+
+carbon_difference_kgco2e
+= scenario_quantity_kg
+  * (
+      baseline_carbon_factor_kgco2e_per_kg
+      - alternative_carbon_factor_kgco2e_per_kg
+    )
+```
+
+에너지 계수 중 하나라도 없으면 `energy_difference_kwh`는 `null`입니다. 탄소 계수 중 하나라도 없으면 `carbon_difference_kgco2e`는 `null`입니다. 계수를 사용한 경우 그 출처를 `factor_source`에 기록합니다.
+
+다음 JSON의 숫자는 필드 구조를 설명하기 위한 예시일 뿐이며, 실제 기본 계수나 실제 ESG 성과를 의미하지 않습니다. 계수가 확정되지 않은 상태에서는 임의의 값을 채우지 않고 `null`을 사용합니다.
+
+```json
+{
+  "source_type": "SCENARIO",
+  "inputs": {
+    "scenario_quantity_kg": 100,
+    "baseline_pathway": "구조 설명용 기준 경로",
+    "alternative_pathway": "구조 설명용 대안 경로",
+    "baseline_energy_factor_kwh_per_kg": null,
+    "alternative_energy_factor_kwh_per_kg": null,
+    "baseline_carbon_factor_kgco2e_per_kg": null,
+    "alternative_carbon_factor_kgco2e_per_kg": null
+  },
+  "results": {
+    "diverted_quantity_kg": 100,
+    "energy_difference_kwh": null,
+    "carbon_difference_kgco2e": null
+  },
+  "formula_version": "ESG-SCENARIO-v0.1",
+  "factor_source": null
+}
+```
 
 ### `receipt`
 
@@ -227,6 +294,5 @@ Green Receipt는 법적 인증서가 아니라 GreenFab Loop MVP 내부의 의�
 
 ## TODO
 
-- ESG `inputs`와 `results`의 세부 필드 및 계산식 확정
 - Rule Checker의 수량·위치 조건과 판정 기준 확정
 - API 구현 전 요청·응답별 필수값과 오류 형식 확정

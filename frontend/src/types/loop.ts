@@ -65,11 +65,27 @@ export interface Decision {
   decided_at: string
 }
 
+export interface EsgScenarioInputs {
+  scenario_quantity_kg: number
+  baseline_pathway: string
+  alternative_pathway: string
+  baseline_energy_factor_kwh_per_kg: number | null
+  alternative_energy_factor_kwh_per_kg: number | null
+  baseline_carbon_factor_kgco2e_per_kg: number | null
+  alternative_carbon_factor_kgco2e_per_kg: number | null
+}
+
+export interface EsgScenarioResults {
+  diverted_quantity_kg: number
+  energy_difference_kwh: number | null
+  carbon_difference_kgco2e: number | null
+}
+
 export interface EsgScenario {
   source_type: 'SCENARIO'
-  inputs: Record<string, unknown>
-  results: Record<string, unknown>
-  formula_version: string | null
+  inputs: EsgScenarioInputs
+  results: EsgScenarioResults
+  formula_version: 'ESG-SCENARIO-v0.1'
   factor_source: string | null
 }
 
