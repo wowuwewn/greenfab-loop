@@ -5,6 +5,11 @@ import type {
   ValidationMetrics,
   WorkflowStep,
 } from '../types/loop'
+import dashboardData from '../../../data/outputs/detect/dashboard_data.json'
+
+const priorityArtifact = dashboardData.risk_items.find(
+  (item) => item.id === 'SECOM-0116',
+)
 
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   { id: '01', label: '위험 선별' },
@@ -27,7 +32,11 @@ export const DETECT_ANALYSIS: DetectAnalysis = {
 export const PRIORITY_CASE: DetectCase = {
   case_id: 'SECOM-0116',
   risk_rank: 4,
-  shap_top_features: null,
+  shap_top_features:
+    priorityArtifact?.top_factors.slice(0, 3).map((factor) => ({
+      feature_name: factor.display_feature,
+      shap_value: factor.contribution,
+    })) ?? null,
   source_type: 'REAL',
 }
 
