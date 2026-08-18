@@ -137,6 +137,7 @@ def rule_check(docs, scores, passport:dict):
     report = {}
     report['model'] = 'BAAI/bge-m3'
     report['created_at'] = f"{datetime.now().astimezone().isoformat()}"
+    report['source_type'] = 'DEMO'
     
     #candidate별 match 확인
     candidates = []
@@ -146,25 +147,25 @@ def rule_check(docs, scores, passport:dict):
         meta = doc.metadata
         
         # 빠진 필드 모음
-        missing = []
+        missing_fields = []
         
         #demand_id 체크
         if meta['demand_id'] is None:
             candidate['demand_id'] = None
-            missing.append('demand_id')
+            missing_fields.append('demand_id')
         else:
             candidate['demand_id'] = meta['demand_id']
         #company_name 체크
         if meta['company_name'] is None:
             candidate['company_name'] = None
-            missing.append('company_name')
+            missing_fields.append('company_name')
         else:
             candidate['company_name'] = meta['company_name']
         
         #demand_description 체크
         if meta['demand_description'] is None:
             candidate['demand_description'] = None
-            missing.append('demand_description')
+            missing_fields.append('demand_description')
         else:
             candidate['demand_description'] = meta['demand_description']
         
@@ -172,9 +173,11 @@ def rule_check(docs, scores, passport:dict):
         candidate['semantic_similarity'] = max(score,0.0)
         
         #필요 수량 체크
-        if meta.get('required_quantity') is None:
+        if passport.get('quantity') is None:
+            quantity_check = None  
+        elif meta.get('required_quantity') is None:
             quantity_check = None
-            missing.append('required_quantity')
+            missing_fields.append('required_quantity')
         elif passport['quantity'] >= meta.get('required_quantity', 0):
             quantity_check = True
         else:
@@ -183,19 +186,35 @@ def rule_check(docs, scores, passport:dict):
         #위치 체크(임시)
         if meta.get('location') is None:
             location_check = None
-            missing.append('location')
+            missing_fields.append('location')
         else:
             location_check = True
+        
+        #demand에 있지만 passport에 없으면 False
+        required_info = True
+        if meta['demand_description'] is not None and passport['description'] is None:
+            required_info = False
+        if meta['required_quantity'] is not None and passport['quantity'] is None:
+            required_info = False
+        if meta['location'] is not None and passport['location'] is None:
+            required_info = False
+
          
         #규칙 체크    
         candidate["rule_check"] = {
             "quantity": quantity_check,
-            "required_info": False if len(missing)>0 else True,
+            "required_info": required_info,
             "location": location_check,
-            "missing_field": missing
+            "missing_fields": missing_fields
         }
         #상태(미완성)
-        candidate['status']='REVIEW'
+        if (quantity_check == True) and (location_check == True) and (required_info == True) and (len(missing_fields) == 0):
+            status = 'REVIEW'
+        elif (quantity_check == False) or (location_check == False):
+            status = 'RULE_FAIL'
+        else:
+            status = 'NEEDS_INFO'
+        candidate['status'] = status
         candidates.append(candidate)
 
     report['candidates'] = candidates  
@@ -212,15 +231,15 @@ if __name__ == '__main__':
     with open('../../data/demo/passport.json', 'r', encoding='utf-8') as f:
         passport = json.load(f)
    
-    desc = passport[0].get('description') or ''
-    cond = passport[0].get('condition') or ''
-    comp = passport[0].get('composition') or ''
+    desc = passport[2].get('description') or ''
+    cond = passport[2].get('condition') or ''
+    comp = passport[2].get('composition') or ''
     
     query = ", ".join([d for d in [desc, cond, comp] if d])  
     
     docs, scores = similarity_search(data_db, query, 1)
     
-    report = rule_check(docs, scores, passport[0])
+    report = rule_check(docs, scores, passport[2])
     print(report)
     ####
     #print([(doc.page_content, doc.metadata, score) for doc,score in zip(docs,scores)])
