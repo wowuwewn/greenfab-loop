@@ -25,6 +25,7 @@ interface ReviewPageProps {
   decision: Decision | null
   onDecisionChange: (decision: Decision) => void
   onBack: () => void
+  onGoToReceipt: () => void
 }
 
 interface DecisionErrors {
@@ -80,6 +81,7 @@ export function ReviewPage({
   decision,
   onDecisionChange,
   onBack,
+  onGoToReceipt,
 }: ReviewPageProps) {
   const [selectedDemandId, setSelectedDemandId] = useState<string | null>(
     decision?.selected_demand_id ?? null,
@@ -90,7 +92,6 @@ export function ReviewPage({
   const [reason, setReason] = useState(decision?.reason ?? '')
   const [errors, setErrors] = useState<DecisionErrors>({})
   const [isEditing, setIsEditing] = useState(decision === null)
-  const [showReceiptNotice, setShowReceiptNotice] = useState(false)
 
   const candidates = match?.candidates ?? []
   const hasCandidates = candidates.length > 0
@@ -138,7 +139,6 @@ export function ReviewPage({
       decided_at: new Date().toISOString(),
     })
     setErrors({})
-    setShowReceiptNotice(false)
     setIsEditing(false)
   }
 
@@ -147,7 +147,6 @@ export function ReviewPage({
     setDecisionStatus(decision?.status ?? null)
     setReason(decision?.reason ?? '')
     setErrors({})
-    setShowReceiptNotice(false)
     setIsEditing(true)
   }
 
@@ -298,17 +297,13 @@ export function ReviewPage({
                   <div><dt>결정 시각</dt><dd>{formatDecisionTime(decision.decided_at)}</dd></div>
                 </dl>
                 <div className="decision-complete__actions">
-                  <button className="primary-button review-receipt-button" type="button" onClick={() => setShowReceiptNotice(true)}>
+                  <button className="primary-button review-receipt-button" type="button" onClick={onGoToReceipt}>
                     결과 기록으로 이동
                     <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
                   </button>
                   <button className="secondary-button review-edit-button" type="button" onClick={editDecision}>
                     결정 수정
                   </button>
-                </div>
-                <div className={`inline-notice review-inline-notice${showReceiptNotice ? ' is-visible' : ''}`} aria-live="polite">
-                  <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
-                  <span>결과 기록 화면은 다음 단계에서 연결됩니다.</span>
                 </div>
               </div>
             ) : (
@@ -364,10 +359,27 @@ export function ReviewPage({
                 </button>
 
                 {!hasCandidates && (
-                  <div className="decision-disabled-note">
-                    <CircleAlert size={15} strokeWidth={1.9} aria-hidden="true" />
-                    <span>후보 탐색 결과 연결 대기</span>
-                  </div>
+                  <>
+                    <div className="decision-disabled-note">
+                      <CircleAlert size={15} strokeWidth={1.9} aria-hidden="true" />
+                      <span>후보 탐색 결과 연결 대기</span>
+                    </div>
+                    {import.meta.env.DEV && (
+                      <div className="review-dev-preview">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={onGoToReceipt}
+                        >
+                          결과 기록 화면 미리보기
+                        </button>
+                        <p>
+                          개발용 미리보기 · 실제 서비스 흐름에서는 최종 결정 후
+                          이동합니다.
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

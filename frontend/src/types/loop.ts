@@ -65,6 +65,26 @@ export interface Decision {
   decided_at: string
 }
 
+export interface EsgScenario {
+  source_type: 'SCENARIO'
+  inputs: Record<string, unknown>
+  results: Record<string, unknown>
+  formula_version: string | null
+  factor_source: string | null
+}
+
+export type ReceiptHandoffStatus = 'RESOURCE_CONFIRMED' | 'APPROVED'
+
+export interface Receipt {
+  receipt_id: string
+  case_id: string
+  passport_id: string
+  selected_demand_id: string | null
+  decision_status: DecisionStatus
+  handoff_status: ReceiptHandoffStatus
+  created_at: string
+}
+
 export interface DetectAnalysis {
   dataset_name: string
   model_name: string
