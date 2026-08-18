@@ -17,6 +17,7 @@ interface PassportPageProps {
   resourcePassport: ResourcePassport | null
   onSave: (resourcePassport: ResourcePassport) => void
   onBackToConfirm: () => void
+  onGoToReview: () => void
 }
 
 interface PassportFormValues {
@@ -57,6 +58,7 @@ export function PassportPage({
   resourcePassport,
   onSave,
   onBackToConfirm,
+  onGoToReview,
 }: PassportPageProps) {
   const [formValues, setFormValues] = useState<PassportFormValues>(() =>
     toFormValues(resourcePassport),
@@ -220,7 +222,7 @@ export function PassportPage({
             {isEditing ? (
               <form className="passport-form" onSubmit={handleSubmit} noValidate>
                 <label className="passport-field passport-field--full">
-                  <span>자원 설명 <em>필수</em></span>
+                  <span>자원 설명 <em className="is-required">필수</em></span>
                   <textarea
                     value={formValues.description}
                     onChange={(event) => updateField('description', event.target.value)}
@@ -360,6 +362,16 @@ export function PassportPage({
                     <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
                     <span>후보 탐색 화면은 다음 단계에서 연결됩니다.</span>
                   </div>
+
+                  {import.meta.env.DEV && (
+                    <div className="passport-dev-preview">
+                      <small>개발용 미리보기 · 실제 서비스 흐름에서는 후보 탐색 후 이동합니다.</small>
+                      <button className="secondary-button" type="button" onClick={onGoToReview}>
+                        최종 검토 화면 미리보기
+                        <ArrowRight size={16} strokeWidth={1.9} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             )}

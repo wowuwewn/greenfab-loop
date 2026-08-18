@@ -3,10 +3,16 @@ import { DetectPage } from './pages/DetectPage'
 import { ConfirmPage } from './pages/ConfirmPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { PassportPage } from './pages/PassportPage'
+import { ReviewPage } from './pages/ReviewPage'
 import { RESOURCE_CONFIRMATION } from './data/detectData'
-import type { ResourceConfirmation, ResourcePassport } from './types/loop'
+import type {
+  Decision,
+  Match,
+  ResourceConfirmation,
+  ResourcePassport,
+} from './types/loop'
 
-type AppView = 'overview' | 'detect' | 'confirm' | 'passport'
+type AppView = 'overview' | 'detect' | 'confirm' | 'passport' | 'review'
 
 function App() {
   const [view, setView] = useState<AppView>('overview')
@@ -14,6 +20,8 @@ function App() {
     useState<ResourceConfirmation>({ ...RESOURCE_CONFIRMATION })
   const [resourcePassport, setResourcePassport] =
     useState<ResourcePassport | null>(null)
+  const [match, setMatch] = useState<Match | null>(null)
+  const [decision, setDecision] = useState<Decision | null>(null)
 
   const changeView = (nextView: AppView) => {
     window.scrollTo({ top: 0 })
@@ -62,8 +70,24 @@ function App() {
       <PassportPage
         resourceConfirmation={resourceConfirmation}
         resourcePassport={resourcePassport}
-        onSave={setResourcePassport}
+        onSave={(passport) => {
+          setResourcePassport(passport)
+          setMatch(null)
+          setDecision(null)
+        }}
         onBackToConfirm={() => changeView('confirm')}
+        onGoToReview={() => changeView('review')}
+      />
+    )
+  }
+
+  if (view === 'review') {
+    return (
+      <ReviewPage
+        match={match}
+        decision={decision}
+        onDecisionChange={setDecision}
+        onBack={() => changeView('passport')}
       />
     )
   }
@@ -73,6 +97,8 @@ function App() {
       onStartDemo={() => {
         setResourceConfirmation({ ...RESOURCE_CONFIRMATION })
         setResourcePassport(null)
+        setMatch(null)
+        setDecision(null)
         changeView('detect')
       }}
     />
