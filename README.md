@@ -4,6 +4,14 @@
 
 GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 먼저 선별하고, 실제 자원 발생이 확인된 경우 `Resource Passport`를 작성해 다음 활용 경로를 준비하는 제조 자원 순환 의사결정 지원 서비스입니다. `BGE-M3` 기반 `Semantic Match`로 의미가 가까운 수요 후보를 찾고, `Rule Checker`와 사람의 최종 판단을 거쳐 `ESG Scenario`와 `Green Receipt`를 남깁니다.
 
+## 배포 링크
+
+- 웹 서비스: [GreenFab Loop](https://greenfab-loop-web.onrender.com/)
+- API 문서: [FastAPI Swagger UI](https://greenfab-loop-api.onrender.com/docs)
+- API 상태: [Readiness Check](https://greenfab-loop-api.onrender.com/health/ready)
+
+현재 Render 배포는 `dev` 브랜치를 추적합니다. 업무 API 호출에는 승인된 API key가 필요하며, secret과 `.env` 파일은 저장소에 포함하지 않습니다.
+
 ## 핵심 흐름
 
 `Detect` → `Resource Confirm` → `Resource Passport` → `Semantic Match` → `Rule Check` → `Human Decision` → `ESG Scenario` → `Green Receipt`
