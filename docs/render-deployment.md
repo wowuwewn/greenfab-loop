@@ -1,7 +1,7 @@
-# Render Backend 배포 가이드
+# Render API·Frontend 배포 가이드
 
-이 문서는 `render.yaml`로 FastAPI, Render Postgres, 실제 BGE-M3와 embedded
-Chroma를 배포하기 전 확인할 운영 계약입니다. Blueprint 파일을 커밋하거나
+이 문서는 `render.yaml`로 팀이 설계한 React UI, FastAPI, Render Postgres,
+실제 BGE-M3와 embedded Chroma를 배포하기 전 확인할 운영 계약입니다. Blueprint 파일을 커밋하거나
 push하는 것만으로 리소스가 생성되지는 않습니다. Render Dashboard에서 Blueprint를
 직접 sync하면 **유료 Web Service, Postgres, persistent disk가 생성**되므로 가격과
 결제수단을 먼저 확인해야 합니다.
@@ -10,13 +10,22 @@ push하는 것만으로 리소스가 생성되지는 않습니다. Render Dashbo
 
 ```text
 Internet
-  -> Render Web Service (FastAPI, one instance / one Uvicorn worker)
+  -> Render Static Site (React/Vite UI)
+       -> Render Web Service (FastAPI, one instance / one Uvicorn worker)
        -> Render Postgres (workflow와 Demand source of truth)
        -> /var/data persistent disk (BGE cache와 embedded Chroma index)
        -> S3-compatible object storage (Passport Evidence)
 ```
 
 - `preDeployCommand: alembic upgrade head`가 새 release 전에 DB migration을 실행합니다.
+- Frontend는 `frontend/src/data/detectData.ts`가 저장소 루트의 Detect artifact를 import하므로
+  Static Site에 `rootDir`를 지정하지 않습니다. 저장소 루트에서 `frontend`를 build하고
+  `frontend/dist`를 배포합니다.
+- Frontend의 `VITE_API_BASE_URL`은 API service의 `RENDER_EXTERNAL_URL`을 Blueprint
+  `fromService`로 주입합니다. API key는 build 환경변수에 넣지 않고 사용자가 통제된 데모
+  세션에서만 입력합니다.
+- Static Site와 API는 각각 `dev`를 명시하고, Frontend CI와 Backend CI가 통과한 commit만
+  자동 배포합니다.
 - 저장소 기본 branch `main`에는 아직 이 backend가 없으므로 Blueprint와 Web Service 모두
   `dev`를 명시합니다. 운영 승격 후에는 검증된 `main` commit으로 함께 변경합니다.
 - build는 Python 3.12.11을 고정하고 `scripts/install_match_runtime.sh`를 실행합니다. 이
@@ -34,7 +43,8 @@ Internet
 
 ## 유료·용량 제약
 
-현재 Blueprint는 실제 BGE runtime을 선택하므로 `pro plus`(8 GB RAM), 10 GB
+React Static Site는 Render의 무료 Static Site로 배포합니다. 현재 Blueprint의 유료 비용은
+실제 BGE runtime을 선택한 API `pro plus`(8 GB RAM), 10 GB
 persistent disk, `basic-1gb` Postgres를 명시합니다. 이는 시작 구성이지 성능 보장이
 아닙니다. BGE-M3 모델 파일, Python/torch runtime, embedding 작업이 함께 메모리를
 사용하므로 실제 Golden flow와 부하 테스트 결과에 따라 상향해야 합니다.
@@ -95,7 +105,7 @@ secret 변수를 나중에 추가하면 Dashboard에서 직접 설정해야 합�
 | 변수 | 입력 형식 |
 | --- | --- |
 | `API_KEY_CREDENTIALS` | key ID, secret SHA-256, actor, role의 JSON array |
-| `CORS_ORIGINS` | 실제 Frontend origin의 JSON array. 예: `["https://app.example.com"]` |
+| `CORS_ORIGINS` | Render가 Blueprint 검토 화면에 표시한 실제 Static Site origin의 정확한 JSON array. 예: `["https://greenfab-loop-web.onrender.com"]` |
 | `EVIDENCE_S3_BUCKET` | private bucket 이름 |
 | `EVIDENCE_S3_REGION` | AWS region 또는 provider 권장 값 |
 | `EVIDENCE_S3_ENDPOINT_URL` | AWS S3는 provider 기본 endpoint, R2 등은 S3 API endpoint |
@@ -126,13 +136,18 @@ role은 `VIEWER`, `OPERATOR`, `DECISION_MAKER`, `ADMIN` 중 하나입니다. 실
 3. CI가 SHA-256으로 고정한 Render 공식 JSON Schema를 통과했는지 확인하고, 활성 Render
    workspace가 있는 운영자 환경에서 `render blueprints validate render.yaml`로 schema 외
    plan·region·resource reference 의미 검증도 다시 실행합니다.
-4. Render Dashboard에서 저장소의 `render.yaml`을 Blueprint로 연결합니다.
-5. 위 `sync: false` 값을 입력하고 최초 배포를 시작합니다.
+4. Render Dashboard에서 저장소의 `render.yaml`을 Blueprint로 연결하고 API와
+   `greenfab-loop-web` Static Site가 모두 표시되는지 확인합니다.
+5. `CORS_ORIGINS`에는 검토 화면에 표시된 Static Site의 정확한 HTTPS origin만 넣고,
+   나머지 `sync: false` 값을 입력한 뒤 최초 배포를 시작합니다.
 6. pre-deploy의 `alembic upgrade head` 성공을 확인합니다.
 7. Render 자동 probe가 `/health/live`인지 확인하고 `/health/ready`도 직접 호출합니다. ready 응답의 provider는
    `BgeChromaMatchProvider`, storage는 `S3EvidenceStorage`여야 합니다.
 8. 운영 Demand를 등록하고 index sync event가 `SUCCEEDED`인지 확인합니다.
 9. Golden workflow, `422`, `409`, `503`, idempotency를 외부 URL에서 재검증합니다.
+10. Static Site에서 API access gate에 발표자용 `DECISION_MAKER` key를 입력해
+    Overview부터 Receipt까지 브라우저 E2E를 재검증합니다. Admin key는 UI 사용자에게
+    전달하지 않습니다.
 
 Production은 `SEED_DEMO_DATA=false`이므로 최초 DB가 비어 있는 것이 정상입니다. 실제
 Detect artifact와 Demand를 승인된 운영 절차로 등록하기 전에는 사용자 workflow가
@@ -220,6 +235,10 @@ Mock으로 자동 전환하지 않습니다.
 - Managed Postgres internal URL, same-region private network, external access 차단:
   <https://render.com/docs/postgresql-creating-connecting>
 - Blueprint 공식 JSON Schema: <https://render.com/schema/render.yaml.json>
+- Static Site와 SPA rewrite: <https://render.com/docs/static-sites>
+- Monorepo rootDir/build filter: <https://render.com/docs/monorepo-support>
+- `RENDER_EXTERNAL_URL`과 service-to-service env reference: <https://render.com/docs/environment-variables>,
+  <https://render.com/docs/blueprint-spec>
 - PyTorch 공식 CPU wheel 설치 명령과 2.7.1 CPU wheel index:
   <https://pytorch.org/get-started/previous-versions/>,
   <https://download.pytorch.org/whl/cpu/torch/>
