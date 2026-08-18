@@ -506,6 +506,24 @@
   font-weight: 550;
 }
 
+.review-dev-preview {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.review-dev-preview .secondary-button {
+  margin-top: 0;
+}
+
+.review-dev-preview p {
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 .decision-complete__status {
   display: flex;
   gap: 8px;
@@ -564,10 +582,6 @@
 .review-edit-button {
   flex: 0 0 auto;
   margin-top: 14px;
-}
-
-.review-inline-notice {
-  justify-content: flex-end;
 }
 
 @media (max-width: 900px) {
