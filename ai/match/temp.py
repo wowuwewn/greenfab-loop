@@ -188,7 +188,7 @@ def rule_check(docs, scores, passport:dict):
             
         candidate["rule_check"] = {
             "quantity": quantity_check,
-            "required_info": True if len(missing)>0 else False,
+            "required_info": False if len(missing)>0 else True,
             "location": location_check,
             "missing_field": missing
         }
