@@ -139,6 +139,10 @@ GET /api/v1/cases?search=SECOM&workflow_status=MATCH_READY&limit=50&offset=0
 
 CORS에서 위 header와 `X-Trace-Id`를 Frontend에 노출합니다.
 
+Demand 목록도 `include_inactive`, `limit`(1~100), `offset`을 지원하고 동일한 세 pagination
+header를 반환합니다. 내용이 같은 PUT과 이미 비활성인 Demand의 반복 deactivate는 version이나
+index event를 새로 만들지 않습니다.
+
 ## 6. 운영 설정과 Health
 
 - PostgreSQL pool: `DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW`,

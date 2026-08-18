@@ -55,7 +55,8 @@
 | 403 | `FORBIDDEN` | 현재 role에 작업 권한이 없음 |
 | 404 | `CASE_NOT_FOUND` | Case가 없음 |
 | 404 | `RECEIPT_NOT_FOUND` | Receipt가 없음 |
-| 404 | `NOT_FOUND` | Demo reset 등 비활성 기능 |
+| 404 | `NOT_FOUND` | 존재하지 않는 경로 또는 Demo reset 등 비활성 기능 |
+| 405 | `METHOD_NOT_ALLOWED` | 해당 경로가 요청 HTTP method를 지원하지 않음 |
 | 409 | `INVALID_STATE` | 현재 Workflow 단계에서 허용되지 않음 |
 | 409 | `INVALID_CANDIDATE` | 최신 Match에 없는 후보를 선택 |
 | 409 | `CANDIDATE_NOT_REVIEWABLE` | `REVIEW`가 아닌 후보를 승인하려 함 |
@@ -147,9 +148,12 @@ Errors: `404 CASE_NOT_FOUND`
 
 PostgreSQL Demand가 업무·Rule 데이터의 source of truth이며 ChromaDB는 재생성 가능한 검색 index입니다.
 
-### `GET /api/v1/demands?include_inactive=false`
+### `GET /api/v1/demands?include_inactive=false&limit=50&offset=0`
 
-활성 Demand를 ID 순서로 반환합니다. `include_inactive=true`는 비활성 기록도 포함합니다. `VIEWER+`가 필요하며 응답에는 `version`, `content_sha256`가 포함됩니다.
+활성 Demand를 ID 순서로 반환합니다. `include_inactive=true`는 비활성 기록도 포함합니다.
+`limit`은 1~100, `offset`은 0 이상이며 Case 목록과 동일하게 `X-Total-Count`,
+`X-Limit`, `X-Offset` header를 반환합니다. `VIEWER+`가 필요하며 응답에는 `version`,
+`content_sha256`가 포함됩니다.
 
 ### `POST /api/v1/demands`
 
@@ -168,15 +172,20 @@ PostgreSQL Demand가 업무·Rule 데이터의 source of truth이며 ChromaDB는
 }
 ```
 
-수량 조건이 있으면 단위가 필요하고 `quantity_min <= quantity_max`여야 합니다. Demand 출처는 `REAL` 또는 `DEMO`이며 `SCENARIO`는 거부합니다. Response `201`.
+수량 조건이 있으면 단위가 필요하고 `quantity_min <= quantity_max`여야 합니다.
+`accepted_conditions`는 최대 100개이고 각 항목은 1~500자입니다. Demand 출처는 `REAL`
+또는 `DEMO`이며 `SCENARIO`는 거부합니다. Response `201`.
 
 ### `PUT /api/v1/demands/{demand_id}`
 
-동일한 business 필드를 전체 교체하고 비활성 Demand라면 다시 활성화합니다. `demand_id`, `source_type`은 변경하지 않습니다.
+동일한 business 필드를 전체 교체하고 비활성 Demand라면 다시 활성화합니다. `demand_id`,
+`source_type`은 변경하지 않습니다. 현재 값과 완전히 같은 요청은 version을 올리거나 vector
+index event를 만들지 않고 현재 표현을 그대로 반환합니다.
 
 ### `POST /api/v1/demands/{demand_id}/deactivate`
 
-관계형 이력을 삭제하지 않고 `is_active=false`로 바꾸며 BGE Provider에서는 같은 ID를 Chroma에서 제거합니다.
+관계형 이력을 삭제하지 않고 `is_active=false`로 바꾸며 BGE Provider에서는 같은 ID를 Chroma에서
+제거합니다. 이미 비활성인 Demand에 대한 반복 요청은 새 version이나 삭제 event를 만들지 않습니다.
 
 ### `POST /api/v1/demands/index/sync`
 

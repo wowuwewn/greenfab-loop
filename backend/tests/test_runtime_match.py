@@ -149,6 +149,7 @@ def test_adapter_loads_model_once_and_keeps_only_demand_ids_in_chroma() -> None:
     assert adapter.list_ids() == {"D01"}
 
 
+@pytest.mark.requires_match_runtime
 def test_adapter_smoke_with_real_persistent_chroma(tmp_path) -> None:
     pytest.importorskip("chromadb")
     model = FakeModel()

@@ -587,6 +587,29 @@ def test_openapi_exposes_contract_envelope_and_common_errors(client) -> None:
         assert error_schema["$ref"].endswith("/ErrorResponse")
 
 
+def test_framework_404_and_405_use_the_common_error_envelope(client) -> None:
+    trace_id = "framework-error-test"
+    not_found = client.get(
+        "/api/v1/not-a-real-route",
+        headers={"X-Trace-Id": trace_id},
+    )
+    assert not_found.status_code == 404
+    assert not_found.json()["error"] == {
+        "code": "NOT_FOUND",
+        "message": "요청한 경로 또는 리소스를 찾을 수 없습니다.",
+        "field_errors": [],
+        "trace_id": trace_id,
+    }
+    assert not_found.headers["X-Trace-Id"] == trace_id
+
+    method_not_allowed = client.patch("/health/live")
+    assert method_not_allowed.status_code == 405
+    assert method_not_allowed.json()["error"]["code"] == "METHOD_NOT_ALLOWED"
+    assert (
+        method_not_allowed.json()["error"]["trace_id"] == method_not_allowed.headers["X-Trace-Id"]
+    )
+
+
 def test_demo_reset_is_disabled_by_default(client) -> None:
     response = client.post("/api/v1/demo/reset")
     assert response.status_code == 404

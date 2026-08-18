@@ -93,6 +93,49 @@ def test_demand_validation_and_duplicate_conflict(client) -> None:
     scenario = {**DEMAND, "demand_id": "DEMAND-SCENARIO", "source_type": "SCENARIO"}
     assert client.post("/api/v1/demands", json=scenario).status_code == 422
 
+    oversized_condition = {
+        **DEMAND,
+        "demand_id": "DEMAND-LONG-CONDITION",
+        "accepted_conditions": ["x" * 501],
+    }
+    too_long = client.post("/api/v1/demands", json=oversized_condition)
+    assert too_long.status_code == 422
+    assert too_long.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_demand_list_is_paginated_with_total_headers(client) -> None:
+    first = client.get("/api/v1/demands?limit=2&offset=0")
+    second = client.get("/api/v1/demands?limit=2&offset=2")
+
+    assert first.status_code == second.status_code == 200
+    assert len(first.json()) == 2
+    assert len(second.json()) == 1
+    assert first.headers["X-Total-Count"] == second.headers["X-Total-Count"] == "3"
+    assert first.headers["X-Limit"] == "2"
+    assert second.headers["X-Offset"] == "2"
+
+
+def test_identical_demand_mutations_do_not_create_index_churn(client) -> None:
+    provider = IndexingMockProvider()
+    client.app.state.match_provider = provider
+    created = client.post("/api/v1/demands", json=DEMAND)
+    assert created.status_code == 201
+    assert created.json()["version"] == 1
+
+    update_payload = {
+        key: value for key, value in DEMAND.items() if key not in {"demand_id", "source_type"}
+    }
+    unchanged = client.put("/api/v1/demands/DEMAND-TEST-001", json=update_payload)
+    assert unchanged.status_code == 200
+    assert unchanged.json()["version"] == 1
+    assert provider.upserted == ["DEMAND-TEST-001"]
+
+    first_deactivate = client.post("/api/v1/demands/DEMAND-TEST-001/deactivate")
+    second_deactivate = client.post("/api/v1/demands/DEMAND-TEST-001/deactivate")
+    assert first_deactivate.status_code == second_deactivate.status_code == 200
+    assert first_deactivate.json()["version"] == second_deactivate.json()["version"] == 2
+    assert provider.deleted == ["DEMAND-TEST-001"]
+
 
 def test_index_sync_is_explicitly_unavailable_for_mock_provider(client) -> None:
     response = client.post("/api/v1/demands/index/sync")

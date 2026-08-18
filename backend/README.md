@@ -10,6 +10,7 @@ FastAPI, PostgreSQL, SQLAlchemy와 Alembic으로 구현한 GreenFab Loop MVP Bac
 - [Data Contract v0.1](../docs/data-contract.md)
 - [Golden Demo](../docs/demo-flow.md)
 - [Backend Productization Foundations](../docs/backend-productization.md)
+- [Render Backend Deployment](../docs/render-deployment.md)
 
 ## 1. Docker Compose로 시작
 
@@ -69,6 +70,22 @@ alembic upgrade head
 alembic current
 ```
 
+GitHub의 `Backend CI` workflow는 Python 3.12와 PostgreSQL 16에서 다음 품질
+게이트를 자동 실행합니다.
+
+- core + development dependency만 설치한 테스트와 Ruff 검사
+- `upgrade -> check -> downgrade -> re-upgrade` migration 왕복 검증
+- 기본 및 `match` profile의 Docker Compose 구성 검증
+- 실행 중인 FastAPI/PostgreSQL을 통과하는 Golden Workflow smoke test
+
+CI는 `MATCH_PROVIDER=mock`과 offline 환경을 강제하며 `.[match]` extra를 설치하지
+않습니다. 따라서 4.59GB BGE-M3 가중치를 내려받지 않습니다. 선택형 Chroma smoke는
+로컬에서 `python -m pip install -e ".[dev,match]"` 후 다음처럼 별도로 실행합니다.
+
+```bash
+pytest -m requires_match_runtime
+```
+
 새 schema 변경은 모델과 migration을 함께 수정합니다.
 
 ```bash
@@ -90,7 +107,9 @@ alembic revision --autogenerate -m "describe change"
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | 허용 Frontend origin JSON array |
 | `AUTH_MODE` | `demo` | 로컬 명시 Demo 또는 API key 필수 mode |
 | `API_KEY_CREDENTIALS` | `[]` | 평문이 아닌 key SHA-256와 actor/role JSON |
-| `EVIDENCE_*` | `.env.example` 참고 | 로컬 Evidence 경로와 최대 upload 크기 |
+| `EVIDENCE_STORAGE_BACKEND` | `local` | 로컬 개발은 filesystem, production은 `s3` 필수 |
+| `EVIDENCE_S3_*` | `.env.example` 참고 | AWS S3/R2 등 S3-compatible private object storage |
+| `EVIDENCE_MAX_BYTES` | `5242880` | Evidence 최대 upload 크기 |
 | `DETECT_ARTIFACT_MAX_BYTES` | `20971520` | Detect import artifact 최대 크기 |
 | `MATCH_PROVIDER` | `mock` | `mock` 또는 명시적인 `bge_chroma`; 장애 시 자동 fallback 없음 |
 | `BGE_MODEL_NAME`, `BGE_MODEL_REVISION` | `BAAI/bge-m3`, `5617a9f…` | embedding 모델과 고정 Hugging Face revision |
@@ -125,6 +144,10 @@ DEMO_RESET_ENABLED=false
 또한 Production은 `AUTH_MODE=required`와 하나 이상의 hash 기반
 `API_KEY_CREDENTIALS`가 필요합니다. 자세한 role과 설정은
 [`backend-productization.md`](../docs/backend-productization.md)를 참고합니다.
+Production은 Render 같은 ephemeral filesystem에 Evidence를 남기지 않도록
+`EVIDENCE_STORAGE_BACKEND=s3`도 강제합니다. S3 runtime을 선택하는 설치는
+`python -m pip install -e ".[storage]"`이며 bucket/endpoint/credential은 환경변수로만
+주입합니다.
 
 ### Detect artifact Import
 
@@ -138,11 +161,20 @@ python -m app.cli.import_detect ../data/outputs/detect/dashboard_data.json \
 
 ### 실제 BGE-M3·ChromaDB 실행
 
-Core 설치는 대형 ML package나 모델을 받지 않습니다. 실제 Provider를 선택할 때만 optional extra를 설치합니다.
+Core 설치는 대형 ML package나 모델을 받지 않습니다. 실제 Provider를 선택할 때만 optional
+extra를 설치합니다. Linux/Render CPU 배포에서는 일반 PyPI의 torch가 CUDA/NVIDIA package를
+함께 선택하지 않도록 공식 PyTorch CPU wheel index를 사용하는 설치 script를 먼저 실행합니다.
 
 ```bash
-python -m pip install -e ".[dev,match]"
+bash scripts/install_match_runtime.sh
+python -m pip install -e ".[dev]"
 ```
+
+script는 torch 2.7.1 CPU wheel을 설치한 뒤 match/storage extras를 설치하고
+`torch.version.cuda is None`과 dependency consistency를 검사합니다. Render는 Python
+3.12.11로 고정하며, 공식 CPU index에 CPython 3.12용 Linux x86_64/aarch64 wheel이 모두
+있는 것을 확인했습니다. 실제 Render build log에서 이 검사가 성공하기 전에는 CUDA package
+제거가 검증됐다고 간주하지 않습니다.
 
 embedded persistent Chroma를 사용할 때 `.env`를 다음처럼 설정합니다.
 
@@ -283,7 +315,7 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 Demand 관리 API:
 
 ```text
-GET  /api/v1/demands?include_inactive=false
+GET  /api/v1/demands?include_inactive=false&limit=50&offset=0
 POST /api/v1/demands
 PUT  /api/v1/demands/{demand_id}
 POST /api/v1/demands/{demand_id}/deactivate
@@ -292,6 +324,10 @@ GET  /api/v1/demands/index/events
 ```
 
 읽기는 `VIEWER+`, create/update/deactivate/index sync와 event 조회는 `ADMIN`만 허용합니다. 이 경로들은 `X-Actor`를 무시하고 API principal actor만 기록합니다. 변경 transaction에 durable `demand_index_events`를 먼저 만들고, commit 후 Chroma를 동기화합니다. 실패하면 DB 변경은 보존되고 event가 `FAILED`가 되며 API는 `503 DEMAND_INDEX_UNAVAILABLE`를 반환합니다. 현재는 관리자가 전체 sync로 재처리하며 자동 worker는 후속 범위입니다.
+
+Demand 목록도 `limit` 1~100, `offset`과 `X-Total-Count`/`X-Limit`/`X-Offset`
+header를 지원합니다. 동일한 PUT 또는 이미 비활성인 Demand의 반복 deactivate는 version과
+index event를 불필요하게 늘리지 않습니다.
 
 ## 7. 검증·무결성·동시성
 
@@ -305,6 +341,7 @@ GET  /api/v1/demands/index/events
 - Decision → Match Candidate, Scenario → Decision, Receipt → Decision/Scenario lineage를 FK로 보존합니다.
 - Match 도중 Passport 또는 Demand가 변경되면 PENDING run을 `FAILED`로 남기고 `409`로 재실행을 요구합니다. Candidate의 회사명·설명·Rule 입력·Demand version/hash는 snapshot이므로 이후 Demand 수정이 과거 결과를 바꾸지 않습니다.
 - `APPROVED` 시 선택 Demand가 활성이고 Candidate snapshot과 같은 version/hash인지 다시 확인합니다.
+- 존재하지 않는 경로와 잘못된 HTTP method까지 각각 `404 NOT_FOUND`, `405 METHOD_NOT_ALLOWED` 공통 오류 형식과 trace ID로 반환합니다.
 - DB 장애는 `503 DATABASE_UNAVAILABLE`, Match Provider 장애는 `503 MATCH_UNAVAILABLE`, 예상하지 못한 예외는 stack trace를 숨긴 `500 INTERNAL_ERROR` 공통 형식으로 반환합니다.
 
 ## 8. 데이터·표현 한계

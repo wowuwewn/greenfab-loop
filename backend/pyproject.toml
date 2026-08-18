@@ -21,6 +21,10 @@ dependencies = [
 match = [
   "chromadb>=0.6.3,<0.7",
   "sentence-transformers>=3.3,<6",
+  "torch==2.7.1",
+]
+storage = [
+  "boto3>=1.35,<2",
 ]
 dev = [
   "httpx>=0.28,<1",
@@ -36,6 +40,9 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "requires_match_runtime: needs the optional Chroma runtime; CI core tests exclude it",
+]
 
 [tool.ruff]
 line-length = 100

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
 from fastapi import Path as ApiPath
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -212,11 +213,22 @@ def read_case(case_id: str, db: DbSession, _principal: ViewerPrincipal) -> CaseE
 
 @api_router.get("/demands", response_model=list[DemandOut])
 def read_demands(
+    response: Response,
     db: DbSession,
     _principal: StrictViewerPrincipal,
     include_inactive: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[DemandOut]:
-    records = list_demands(db, include_inactive=include_inactive)
+    records, total = list_demands(
+        db,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+    )
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Limit"] = str(limit)
+    response.headers["X-Offset"] = str(offset)
     return [DemandOut.model_validate(record) for record in records]
 
 
@@ -258,17 +270,23 @@ def replace_demand(
     principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
-        record = update_demand(db, demand_id, payload)
-        event = create_index_event(
-            db,
-            operation="UPSERT",
-            demand_id=record.demand_id,
-            requested_by=principal.actor,
-            target_version=record.version,
-            target_content_sha256=record.content_sha256,
-            trace_id=_trace_id(request),
-        )
+        record, changed = update_demand(db, demand_id, payload)
         result = DemandOut.model_validate(record)
+        event = (
+            create_index_event(
+                db,
+                operation="UPSERT",
+                demand_id=record.demand_id,
+                requested_by=principal.actor,
+                target_version=record.version,
+                target_content_sha256=record.content_sha256,
+                trace_id=_trace_id(request),
+            )
+            if changed
+            else None
+        )
+    if event is None:
+        return result
     _process_demand_index_event(
         request,
         db,
@@ -287,17 +305,23 @@ def remove_demand_from_matching(
     principal: StrictAdminPrincipal,
 ) -> DemandOut:
     with db.begin():
-        record = deactivate_demand(db, demand_id)
-        event = create_index_event(
-            db,
-            operation="DELETE",
-            demand_id=record.demand_id,
-            requested_by=principal.actor,
-            target_version=record.version,
-            target_content_sha256=record.content_sha256,
-            trace_id=_trace_id(request),
-        )
+        record, changed = deactivate_demand(db, demand_id)
         result = DemandOut.model_validate(record)
+        event = (
+            create_index_event(
+                db,
+                operation="DELETE",
+                demand_id=record.demand_id,
+                requested_by=principal.actor,
+                target_version=record.version,
+                target_content_sha256=record.content_sha256,
+                trace_id=_trace_id(request),
+            )
+            if changed
+            else None
+        )
+    if event is None:
+        return result
     _process_demand_index_event(
         request,
         db,
@@ -635,7 +659,7 @@ def read_passport_evidence(
 
 @api_router.get(
     "/cases/{case_id}/resource-passport/evidence/{evidence_id}/content",
-    response_class=FileResponse,
+    response_class=StreamingResponse,
 )
 def download_passport_evidence(
     case_id: str,
@@ -643,13 +667,31 @@ def download_passport_evidence(
     request: Request,
     db: DbSession,
     _principal: ViewerPrincipal,
-) -> FileResponse:
+) -> StreamingResponse:
     evidence = get_passport_evidence(db, case_id, evidence_id)
-    path = _evidence_storage(request).resolve(evidence.storage_key)
-    return FileResponse(
-        path,
+    storage = _evidence_storage(request)
+    storage_context = storage.open(evidence.storage_key)
+    stream = storage_context.__enter__()
+    try:
+        first_chunk = stream.read(64 * 1024)
+    except BaseException as exc:
+        storage_context.__exit__(type(exc), exc, exc.__traceback__)
+        raise
+
+    def content_chunks():
+        try:
+            if first_chunk:
+                yield first_chunk
+            while chunk := stream.read(64 * 1024):
+                yield chunk
+        finally:
+            storage_context.__exit__(None, None, None)
+
+    encoded_filename = quote(evidence.original_filename, safe="")
+    return StreamingResponse(
+        content_chunks(),
         media_type=evidence.media_type,
-        filename=evidence.original_filename,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 

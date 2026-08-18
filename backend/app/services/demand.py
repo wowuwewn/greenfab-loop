@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,11 +19,23 @@ from app.services.match import DemandIndexDocument, DemandSnapshot
 from app.services.rules import DemandRules
 
 
-def list_demands(session: Session, *, include_inactive: bool = False) -> list[Demand]:
+def list_demands(
+    session: Session,
+    *,
+    include_inactive: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Demand], int]:
     statement = select(Demand)
+    count_statement = select(func.count()).select_from(Demand)
     if not include_inactive:
         statement = statement.where(Demand.is_active.is_(True))
-    return list(session.scalars(statement.order_by(Demand.demand_id.asc())).all())
+        count_statement = count_statement.where(Demand.is_active.is_(True))
+    total = session.scalar(count_statement) or 0
+    records = session.scalars(
+        statement.order_by(Demand.demand_id.asc()).limit(limit).offset(offset)
+    ).all()
+    return list(records), total
 
 
 def get_demand(session: Session, demand_id: str) -> Demand:
@@ -56,25 +68,32 @@ def create_demand(session: Session, payload: DemandCreate) -> Demand:
     return demand
 
 
-def update_demand(session: Session, demand_id: str, payload: DemandUpdate) -> Demand:
+def update_demand(session: Session, demand_id: str, payload: DemandUpdate) -> tuple[Demand, bool]:
     demand = get_demand_for_update(session, demand_id)
-    for field_name, value in payload.model_dump().items():
+    values = payload.model_dump()
+    changed = not demand.is_active or any(
+        getattr(demand, field_name) != value for field_name, value in values.items()
+    )
+    if not changed:
+        return demand, False
+    for field_name, value in values.items():
         setattr(demand, field_name, value)
     demand.is_active = True
     demand.version += 1
     demand.content_sha256 = demand_content_sha256(demand)
     session.flush()
-    return demand
+    return demand, True
 
 
-def deactivate_demand(session: Session, demand_id: str) -> Demand:
+def deactivate_demand(session: Session, demand_id: str) -> tuple[Demand, bool]:
     demand = get_demand_for_update(session, demand_id)
-    if demand.is_active:
-        demand.is_active = False
-        demand.version += 1
-        demand.content_sha256 = demand_content_sha256(demand)
+    if not demand.is_active:
+        return demand, False
+    demand.is_active = False
+    demand.version += 1
+    demand.content_sha256 = demand_content_sha256(demand)
     session.flush()
-    return demand
+    return demand, True
 
 
 def demand_to_snapshot(demand: Demand) -> DemandSnapshot:
