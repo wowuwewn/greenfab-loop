@@ -1,13 +1,32 @@
+import { useState } from 'react'
 import { ArrowRight, RefreshCw } from 'lucide-react'
+import { toApiError, type ApiError } from '../api/client'
+import { ApiErrorMessage } from '../components/ApiErrorMessage'
 import { DataLegend } from '../components/DataLegend'
 import { ServiceFlowVisual } from '../components/ServiceFlowVisual'
 import '../overview.css'
 
 interface OverviewPageProps {
-  onStartDemo: () => void
+  onStartDemo: () => Promise<void>
 }
 
 export function OverviewPage({ onStartDemo }: OverviewPageProps) {
+  const [isStarting, setIsStarting] = useState(false)
+  const [apiError, setApiError] = useState<ApiError | null>(null)
+
+  const startDemo = async () => {
+    setIsStarting(true)
+    setApiError(null)
+
+    try {
+      await onStartDemo()
+    } catch (error) {
+      setApiError(toApiError(error))
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
   return (
     <div className="app-shell overview-page">
       <header className="topbar">
@@ -38,14 +57,27 @@ export function OverviewPage({ onStartDemo }: OverviewPageProps) {
             </p>
 
             <div className="overview-hero__actions">
-              <button className="overview-cta" type="button" onClick={onStartDemo}>
-                데모 시작
+              <button
+                className="overview-cta"
+                type="button"
+                onClick={startDemo}
+                disabled={isStarting}
+              >
+                {isStarting ? '데모를 준비하고 있습니다...' : '데모 시작'}
                 <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
               </button>
               <div className="demo-use-case" aria-label="이번 MVP 적용 사례">
                 <span>이번 MVP 적용 사례 · 반도체 제조 · UCI SECOM</span>
               </div>
             </div>
+            <ApiErrorMessage
+              error={apiError}
+              message={
+                apiError?.status === 404 && apiError.code === 'NOT_FOUND'
+                  ? '백엔드 데모 초기화 기능이 비활성화되어 있습니다.'
+                  : undefined
+              }
+            />
           </div>
 
           <ServiceFlowVisual />

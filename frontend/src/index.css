@@ -752,6 +752,17 @@ ol {
   transform: translateX(2px);
 }
 
+.primary-button:disabled,
+.primary-button:disabled:hover {
+  opacity: 0.62;
+  cursor: wait;
+  transform: none;
+}
+
+.primary-button:disabled:hover svg {
+  transform: none;
+}
+
 .inline-notice {
   display: flex;
   overflow: hidden;
@@ -777,6 +788,81 @@ ol {
 .inline-notice svg {
   flex: 0 0 auto;
   color: var(--color-green);
+}
+
+.api-error-message {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e6c5bf;
+  border-radius: var(--radius-sm);
+  color: #874b43;
+  background: #fcf4f2;
+}
+
+.api-error-message > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.api-error-message__copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.api-error-message__copy strong,
+.api-error-message__copy p,
+.api-error-message__copy small {
+  display: block;
+}
+
+.api-error-message__copy strong {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.api-error-message__copy p,
+.api-error-message__copy li {
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.api-error-message__copy p {
+  margin-top: 2px;
+}
+
+.api-error-message__copy ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.api-error-message__copy small {
+  margin-top: 5px;
+  color: #9c6d66;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.api-error-message > button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid #dcb7b0;
+  border-radius: 7px;
+  color: #874b43;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.api-error-message > button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .interpretation-note {

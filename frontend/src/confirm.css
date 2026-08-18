@@ -334,6 +334,11 @@
   background: var(--color-bg);
 }
 
+.confirmation-option:disabled {
+  opacity: 0.58;
+  cursor: wait;
+}
+
 .confirmation-result__copy strong {
   color: var(--color-text);
   font-size: 14px;
