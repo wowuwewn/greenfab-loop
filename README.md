@@ -4,9 +4,17 @@
 
 GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 먼저 선별하고, 실제 자원 발생이 확인된 경우 `Resource Passport`를 작성해 다음 활용 경로를 준비하는 제조 자원 순환 의사결정 지원 서비스입니다. `BGE-M3` 기반 `Semantic Match`로 의미가 가까운 수요 후보를 찾고, `Rule Checker`와 사람의 최종 판단을 거쳐 `ESG Scenario`와 `Green Receipt`를 남깁니다.
 
+## 배포 링크
+
+- 웹 서비스: [GreenFab Loop](https://greenfab-loop-web.onrender.com/)
+- API 문서: [FastAPI Swagger UI](https://greenfab-loop-api.onrender.com/docs)
+- API 상태: [Readiness Check](https://greenfab-loop-api.onrender.com/health/ready)
+
+현재 Render 배포는 `dev` 브랜치를 추적합니다. 업무 API 호출에는 승인된 API key가 필요하며, secret과 `.env` 파일은 저장소에 포함하지 않습니다.
+
 ## 핵심 흐름
 
-`Detect` → `Resource Passport` → `Semantic Match` → `Rule / Human Decision` → `ESG Scenario` → `Green Receipt`
+`Detect` → `Resource Confirm` → `Resource Passport` → `Semantic Match` → `Rule Check` → `Human Decision` → `ESG Scenario` → `Green Receipt`
 
 ## 폴더 구성
 
@@ -32,7 +40,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ## 현재 상태
 
-현재는 팀 협업을 위한 초기 프로젝트 구조를 구성한 단계입니다. 애플리케이션, AI 모델, 데이터베이스 등의 실제 기능은 아직 구현하지 않았습니다.
+현재 프런트 Golden Demo 화면, SECOM Detect 재현 파이프라인, FastAPI·PostgreSQL·Alembic 기반 Backend Workflow가 구현되어 있습니다. Backend에는 API key 역할 경계, Detect artifact import, Passport Evidence 개발용 storage, versioned Rule policy catalog, 그리고 선택 가능한 실제 BAAI/bge-m3·ChromaDB Provider가 포함됩니다. 운영 SSO/tenant와 object storage는 후속 범위입니다. 실행 방법과 API 순서는 [`backend/README.md`](backend/README.md)를 참고합니다.
 
 ## 팀 작업 가이드
 
@@ -53,6 +61,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ```text
 Detect
+→ Resource Confirm
 → Resource Passport
 → Semantic Match
 → Rule Check
@@ -68,3 +77,8 @@ Detect
 - REAL / DEMO / SCENARIO를 구분한다.
 - `main` 브랜치는 최종 안정본으로 사용하고, 기능 개발은 별도 브랜치에서 진행할 예정이다.
 - API key, secret, `.env` 파일은 GitHub에 올리지 않는다.
+
+## Figma 디자인
+
+GreenFab Loop의 전체 화면, 디자인 시스템, 반응형 기준과 3분 데모 프로토타입은
+[Figma 디자인 핸드오프](docs/design/greenfab-loop-figma.md)에서 확인할 수 있습니다.
