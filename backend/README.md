@@ -162,7 +162,7 @@ CHROMA_HOST=chroma
 CHROMA_PORT=8000
 ```
 
-Compose의 Chroma host port는 로컬 점검용으로 `127.0.0.1`에만 bind됩니다. 인증과 TLS를 별도로 구성하기 전에는 Chroma port를 외부 네트워크에 공개하지 않습니다. 기본 모델 revision은 [BAAI/bge-m3의 검증된 commit](https://huggingface.co/BAAI/bge-m3/commit/5617a9f61b028005a4858fdac845db406aefb181)으로 고정하며, revision을 바꾸면 별도 collection으로 재색인해야 합니다.
+Compose의 Chroma 서비스는 host port를 발행하지 않고 Compose 내부 네트워크에서 Backend만 접근합니다. 인증과 TLS를 별도로 구성하기 전에는 Chroma port를 외부 네트워크에 공개하지 않습니다. 기본 모델 revision은 [BAAI/bge-m3의 검증된 commit](https://huggingface.co/BAAI/bge-m3/commit/5617a9f61b028005a4858fdac845db406aefb181)으로 고정하며, revision을 바꾸면 별도 collection으로 재색인해야 합니다.
 
 ```bash
 docker compose --profile match up --build
