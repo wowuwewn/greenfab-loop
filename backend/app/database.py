@@ -26,6 +26,9 @@ def create_database_engine(database_url: str, *, echo: bool = False) -> Engine:
             engine_options["poolclass"] = StaticPool
     else:
         engine_options["pool_pre_ping"] = True
+        engine_options["pool_size"] = settings.database_pool_size
+        engine_options["max_overflow"] = settings.database_max_overflow
+        engine_options["pool_timeout"] = settings.database_pool_timeout_seconds
 
     database_engine = create_engine(database_url, **engine_options)
     if database_url.startswith("sqlite"):

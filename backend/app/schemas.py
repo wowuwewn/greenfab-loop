@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.enums import (
     DecisionStatus,
+    EvidenceType,
     HandoffStatus,
     MatchCandidateStatus,
     ResourceConfirmationStatus,
@@ -37,7 +39,7 @@ class CaseOut(ContractModel):
 
 class ResourceConfirmationRequest(ContractModel):
     status: ResourceConfirmationStatus
-    confirmed_by: str = Field(min_length=1, max_length=120)
+    confirmed_by: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def disallow_pending_submission(self) -> ResourceConfirmationRequest:
@@ -112,7 +114,7 @@ class DecisionRequest(ContractModel):
     status: DecisionStatus
     selected_demand_id: str | None = Field(default=None, max_length=120)
     reason: str = Field(min_length=10, max_length=2000)
-    decided_by: str = Field(min_length=1, max_length=120)
+    decided_by: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def require_selected_candidate_for_approval(self) -> DecisionRequest:
@@ -147,6 +149,111 @@ class ReceiptOut(ContractModel):
     created_at: datetime | None
 
 
+class PassportEvidenceOut(ContractModel):
+    evidence_id: str
+    passport_id: str
+    original_filename: str
+    media_type: str
+    size_bytes: int
+    sha256: str
+    evidence_type: EvidenceType
+    description: str | None
+    source_type: SourceType
+    uploaded_by: str
+    created_at: datetime
+
+
+class DetectImportOut(ContractModel):
+    detect_import_id: str
+    artifact_sha256: str
+    artifact_name: str
+    dataset_name: str
+    model_name: str
+    model_revision: str
+    source_type: SourceType
+    case_count: int
+    created_case_count: int
+    updated_case_count: int
+    unchanged_case_count: int
+    created: bool
+
+
+RuleField = Literal[
+    "description",
+    "quantity",
+    "unit",
+    "condition",
+    "location",
+    "composition",
+]
+RuleOperator = Literal["REQUIRED", "GTE", "LTE", "EQUALS", "IN"]
+RuleSeverity = Literal["NEEDS_INFO", "BLOCK"]
+
+
+class RuleDefinition(ContractModel):
+    rule_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    field: RuleField
+    operator: RuleOperator
+    value: Any = None
+    severity: RuleSeverity
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_operator_value(self) -> RuleDefinition:
+        if self.operator == "REQUIRED" and self.value is not None:
+            raise ValueError("REQUIRED rules must not define value")
+        if self.operator in {"GTE", "LTE"} and (
+            not isinstance(self.value, int | float) or isinstance(self.value, bool)
+        ):
+            raise ValueError(f"{self.operator} rules require a numeric value")
+        if self.operator in {"GTE", "LTE"} and not math.isfinite(float(self.value)):
+            raise ValueError(f"{self.operator} rules require a finite numeric value")
+        if self.operator in {"GTE", "LTE"} and self.field != "quantity":
+            raise ValueError(f"{self.operator} rules are supported only for quantity")
+        if self.operator == "IN":
+            if not isinstance(self.value, list) or not 1 <= len(self.value) <= 100:
+                raise ValueError("IN rules require 1 to 100 scalar values")
+            if any(not _is_bounded_scalar(item) for item in self.value):
+                raise ValueError("IN rules require finite scalar values")
+        if self.operator == "EQUALS" and not _is_bounded_scalar(self.value):
+            raise ValueError("EQUALS rules require a finite scalar value")
+        return self
+
+
+class RulePolicyVersionCreate(ContractModel):
+    display_name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    rules: list[RuleDefinition] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_rule_ids(self) -> RulePolicyVersionCreate:
+        rule_ids = [rule.rule_id for rule in self.rules]
+        if len(rule_ids) != len(set(rule_ids)):
+            raise ValueError("rule_id values must be unique within a policy version")
+        return self
+
+
+class RulePolicyVersionOut(ContractModel):
+    rule_policy_version_id: str
+    policy_key: str
+    version: int
+    definition_sha256: str
+    rules: list[RuleDefinition]
+    created_by: str
+    created_at: datetime
+    activated_at: datetime | None
+    activated_by: str | None
+    is_active: bool
+
+
+class RulePolicyOut(ContractModel):
+    policy_key: str
+    display_name: str
+    description: str | None
+    active_version: int | None
+    versions: list[RulePolicyVersionOut]
+
+
 class CaseEnvelope(ContractModel):
     case: CaseOut
     resource_confirmation: ResourceConfirmationOut
@@ -169,6 +276,7 @@ class HealthOut(ContractModel):
     status: str
     database: str | None = None
     match_provider: str | None = None
+    evidence_storage: str | None = None
 
 
 class FieldError(ContractModel):
@@ -185,3 +293,13 @@ class ErrorDetail(ContractModel):
 
 class ErrorResponse(ContractModel):
     error: ErrorDetail
+
+
+def _is_bounded_scalar(value: Any) -> bool:
+    if value is None or isinstance(value, dict | list):
+        return False
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
+    if isinstance(value, str) and len(value) > 2000:
+        return False
+    return isinstance(value, str | int | float | bool)

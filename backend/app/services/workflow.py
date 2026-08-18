@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Select, nullslast, select
+from sqlalchemy import Select, func, nullslast, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.enums import (
@@ -59,11 +59,28 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def list_case_summaries(session: Session) -> list[CaseSummary]:
+def list_case_summaries(
+    session: Session,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    search: str | None = None,
+    workflow_status: WorkflowStatus | None = None,
+) -> tuple[list[CaseSummary], int]:
+    filters = []
+    if search:
+        filters.append(Case.case_id.icontains(search.strip(), autoescape=True))
+    if workflow_status is not None:
+        filters.append(Case.workflow_status == workflow_status)
+    total = session.scalar(select(func.count()).select_from(Case).where(*filters)) or 0
     records = session.scalars(
-        select(Case).order_by(nullslast(Case.risk_rank.asc()), Case.case_id.asc())
+        select(Case)
+        .where(*filters)
+        .order_by(nullslast(Case.risk_rank.asc()), Case.case_id.asc())
+        .limit(limit)
+        .offset(offset)
     ).all()
-    return [
+    summaries = [
         CaseSummary(
             case_id=record.case_id,
             risk_rank=record.risk_rank,
@@ -73,6 +90,7 @@ def list_case_summaries(session: Session) -> list[CaseSummary]:
         )
         for record in records
     ]
+    return summaries, total
 
 
 def get_case(session: Session, case_id: str) -> Case:
@@ -215,6 +233,7 @@ def confirm_resource(
     case_id: str,
     payload: ResourceConfirmationRequest,
     *,
+    actor: str | None = None,
     trace_id: str | None = None,
 ) -> Case:
     record = get_case_for_update(session, case_id)
@@ -222,7 +241,11 @@ def confirm_resource(
     if confirmation is None:
         raise DomainError("INTEGRITY_ERROR", "현장 확인 레코드가 없습니다.", 500)
 
-    if confirmation.status is payload.status and confirmation.confirmed_by == payload.confirmed_by:
+    effective_actor = (actor or payload.confirmed_by or "").strip()
+    if not effective_actor:
+        raise DomainError("INVALID_ACTOR", "현장 확인 담당자가 필요합니다.", 422)
+
+    if confirmation.status is payload.status and confirmation.confirmed_by == effective_actor:
         return record
 
     _require_status(
@@ -233,7 +256,7 @@ def confirm_resource(
 
     before = record.workflow_status
     confirmation.status = payload.status
-    confirmation.confirmed_by = payload.confirmed_by
+    confirmation.confirmed_by = effective_actor
     confirmation.confirmed_at = utcnow()
 
     if payload.status is ResourceConfirmationStatus.CONFIRMED:
@@ -245,7 +268,7 @@ def confirm_resource(
         session,
         record,
         event_type="RESOURCE_CONFIRMATION_RECORDED",
-        actor=payload.confirmed_by,
+        actor=effective_actor,
         before=before,
         payload={"status": payload.status.value},
         trace_id=trace_id,
@@ -416,6 +439,7 @@ def save_decision(
     case_id: str,
     payload: DecisionRequest,
     *,
+    actor: str | None = None,
     trace_id: str | None = None,
 ) -> Case:
     record = get_case_for_update(session, case_id)
@@ -453,6 +477,10 @@ def save_decision(
                 409,
             )
 
+    effective_actor = (actor or payload.decided_by or "").strip()
+    if not effective_actor:
+        raise DomainError("INVALID_ACTOR", "Decision 담당자가 필요합니다.", 422)
+
     before = record.workflow_status
     decision = record.decision
     if decision is None:
@@ -464,7 +492,7 @@ def save_decision(
         selected.match_candidate_id if selected is not None else None
     )
     decision.reason = payload.reason.strip()
-    decision.decided_by = payload.decided_by.strip()
+    decision.decided_by = effective_actor
     decision.decided_at = utcnow()
     record.workflow_status = WorkflowStatus.DECIDED
 
@@ -472,7 +500,7 @@ def save_decision(
         session,
         record,
         event_type="HUMAN_DECISION_RECORDED",
-        actor=payload.decided_by,
+        actor=effective_actor,
         before=before,
         payload={
             "status": payload.status.value,

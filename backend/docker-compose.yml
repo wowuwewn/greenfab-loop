@@ -25,10 +25,21 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-greenfab}:${POSTGRES_PASSWORD:-greenfab}@postgres:5432/${POSTGRES_DB:-greenfab}
       DATABASE_ECHO: ${DATABASE_ECHO:-false}
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-5}
+      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-10}
+      DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-10}
       DEMO_MODE: ${DEMO_MODE:-true}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
       DEMO_RESET_ENABLED: ${DEMO_RESET_ENABLED:-false}
       CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:5173"]}'
+      AUTH_MODE: ${AUTH_MODE:-demo}
+      API_KEY_CREDENTIALS: '${API_KEY_CREDENTIALS:-[]}'
+      DEMO_ACTOR: ${DEMO_ACTOR:-demo_operator}
+      EVIDENCE_STORAGE_ROOT: ${EVIDENCE_STORAGE_ROOT:-/app/var/evidence}
+      EVIDENCE_MAX_BYTES: ${EVIDENCE_MAX_BYTES:-5242880}
+      DETECT_ARTIFACT_MAX_BYTES: ${DETECT_ARTIFACT_MAX_BYTES:-20971520}
+    volumes:
+      - greenfab_evidence_data:/app/var/evidence
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -37,3 +48,4 @@ services:
 
 volumes:
   greenfab_postgres_data:
+  greenfab_evidence_data:

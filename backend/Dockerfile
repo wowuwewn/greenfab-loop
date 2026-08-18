@@ -12,7 +12,9 @@ COPY pyproject.toml alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
 
-RUN pip install --no-cache-dir . && chown -R greenfab:greenfab /app
+RUN pip install --no-cache-dir . \
+    && mkdir -p /app/var/evidence \
+    && chown -R greenfab:greenfab /app
 
 USER greenfab
 

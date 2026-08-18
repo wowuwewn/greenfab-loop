@@ -14,8 +14,10 @@
 
 ```mermaid
 erDiagram
+    DETECT_IMPORTS ||--o{ CASES : produced
     CASES ||--|| RESOURCE_CONFIRMATIONS : has
     CASES ||--o| RESOURCE_PASSPORTS : has
+    RESOURCE_PASSPORTS ||--o{ PASSPORT_EVIDENCE : documents
     CASES ||--o{ MATCH_RUNS : executes
     RESOURCE_PASSPORTS ||--o{ MATCH_RUNS : input
     MATCH_RUNS ||--o{ MATCH_CANDIDATES : contains
@@ -31,6 +33,7 @@ erDiagram
     RESOURCE_PASSPORTS ||--o| RECEIPTS : summarized_by
     DEMANDS o|--o{ RECEIPTS : selected
     CASES ||--o{ AUDIT_EVENTS : records
+    RULE_POLICIES ||--o{ RULE_POLICY_VERSIONS : versions
 ```
 
 ## 3. 테이블
@@ -44,6 +47,9 @@ erDiagram
 | `shap_top_features` | `JSONB` | `[{feature_name, shap_value}]` |
 | `source_type` | `VARCHAR` | `REAL`, `DEMO` |
 | `workflow_status` | `VARCHAR` | 내부 Workflow 상태 |
+| `detect_import_id` | `VARCHAR(64)` | FK detect_imports, 최신 Detect provenance |
+| `risk_score` | `DOUBLE PRECISION` | 원 artifact의 상대 위험 score, null 가능 |
+| `risk_score_type` | `TEXT` | score 해석 문구, null 가능 |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | 서버 생성 |
 
 허용 상태:
@@ -55,6 +61,23 @@ NOT_CONFIRMED, CLOSED
 ```
 
 정상 API 흐름은 미발생 확인 시 `CLOSED`로 바로 전환합니다. `NOT_CONFIRMED` 내부 enum은 현재 저장 전이에는 사용하지 않는 예약 값입니다.
+
+### `detect_imports`
+
+| 컬럼 | 타입 | 제약·설명 |
+| --- | --- | --- |
+| `detect_import_id` | `VARCHAR(64)` | PK |
+| `artifact_sha256` | `VARCHAR(64)` | UNIQUE, import idempotency key |
+| `artifact_name` | `VARCHAR(255)` | basename만 저장, 절대 경로 미저장 |
+| `dataset_name`, `model_name`, `model_revision` | `VARCHAR` | provenance/model metadata |
+| `validation_method`, `score_type` | `TEXT` | 해석 경계, null 가능 |
+| `source_type` | `VARCHAR` | `REAL`, `DEMO` |
+| `case_count` | `INTEGER` | 0 이상 |
+| `provenance_json` | `JSONB` | 허용된 artifact metadata·summary·metrics |
+| `imported_by`, `created_at` | `VARCHAR`, `TIMESTAMPTZ` | 실행 actor와 시각 |
+
+Case는 최신 `detect_import_id`를 FK로 연결합니다. 같은 artifact hash 재실행은 import row와
+변경 없는 Case Audit를 중복 생성하지 않으며 기존 Workflow 진행 상태를 보존합니다.
 
 ### `resource_confirmations`
 
@@ -92,6 +115,23 @@ DB Check Constraint는 다음 완료 필드 조합을 강제합니다.
 
 DB와 API 모두 `(quantity, unit)` 양방향 pair를 강제합니다. 즉 수량만 또는 단위만 저장할 수 없으며, 단위는 trim 후 비어 있지 않아야 합니다. `description`은 DB 호환성상 null을 허용하지만 MVP API에서는 trim 후 빈 문자열을 거부합니다.
 
+### `passport_evidence`
+
+| 컬럼 | 타입 | 제약·설명 |
+| --- | --- | --- |
+| `evidence_id` | `VARCHAR(64)` | PK |
+| `passport_id` | `VARCHAR(64)` | FK resource_passports, CASCADE |
+| `storage_key` | `VARCHAR(255)` | UNIQUE, API 비노출 generated key |
+| `original_filename`, `media_type` | `VARCHAR` | 표시 metadata |
+| `size_bytes`, `sha256` | `BIGINT`, `VARCHAR(64)` | 양수 크기와 content digest |
+| `evidence_type` | `VARCHAR` | `PHOTO`, `DOCUMENT`, `ANALYSIS_REPORT`, `OTHER` |
+| `description` | `TEXT` | null 가능 |
+| `source_type` | `VARCHAR` | `REAL`, `DEMO` |
+| `uploaded_by`, `created_at` | `VARCHAR`, `TIMESTAMPTZ` | 인증 actor와 시각 |
+
+Binary는 DB나 Git에 저장하지 않습니다. 현재 local storage는 개발 전용이며 운영 object storage
+수명주기와 DB cascade의 binary cleanup은 별도 adapter/job으로 보강해야 합니다.
+
 ### `demands`
 
 Demand는 Rule과 향후 ChromaDB 인덱싱의 관계형 원본입니다.
@@ -110,6 +150,13 @@ Demand는 Rule과 향후 ChromaDB 인덱싱의 관계형 원본입니다.
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | 서버 생성 |
 
 현재 Rule Service는 수량, 단위, 필수 필드와 별도 `accepted_locations` 입력을 평가합니다. `accepted_conditions`는 저장만 하며 아직 자동 판정하지 않습니다. DB `location`을 실제 BGE Adapter의 Rule 입력으로 변환하는 작업은 후속 Adapter 책임입니다.
+
+### `rule_policies`, `rule_policy_versions`
+
+`rule_policies`는 `policy_key`, 표시 metadata, `active_version`을 보관합니다.
+`rule_policy_versions`는 `(policy_key, version)` UNIQUE, immutable `definition_json`, canonical
+`definition_sha256`, 생성·활성화 actor/time을 저장합니다. Catalog API는 version과 activation을
+관리하지만 현재 Match/Rule 실행 row는 아직 `rule_policy_version_id`를 참조하지 않습니다.
 
 ### `match_runs`
 
@@ -219,6 +266,9 @@ Audit Event는 MVP 내부 추적 기록이며 인증된 외부 감사 로그가 
 - `cases(workflow_status)`
 - `match_runs(case_id, created_at)`
 - `audit_events(case_id, created_at)`
+- `cases(detect_import_id)`
+- `passport_evidence(passport_id, created_at)`
+- `rule_policy_versions(policy_key, created_at)`
 
 FK 삭제 정책:
 
@@ -253,17 +303,21 @@ ChromaDB와 실제 BGE Adapter는 현재 migration에 포함되지 않습니다.
 ## 7. Migration과 테스트
 
 - 초기 schema: `backend/alembic/versions/0001_initial_schema.py`
+- Productization 기반: `backend/alembic/versions/0002_productization_foundations.py`
 - 적용: `alembic upgrade head`
 - 롤백: 개발 환경에서만 `alembic downgrade -1`
 - 테스트는 SQLite의 type variant를 사용하지만 PostgreSQL migration도 별도로 실행 검증해야 합니다.
-- `ENVIRONMENT=production`에서는 `SEED_DEMO_DATA=false`, `DEMO_RESET_ENABLED=false`가 아니면 설정 검증 단계에서 시작을 거부합니다.
+- `development|test|local` 외 환경에서는 demo mode/seed/reset을 끄고, Production은
+  `AUTH_MODE=required`와 hash 기반 credential을 설정해야 합니다.
 
 ## 8. 후속 TODO
 
-- 사용자·조직·사업장·RBAC 테이블
+- SSO/OIDC, 사용자·조직·사업장 tenant와 key lifecycle 테이블
 - 범용 idempotency request hash·처리 상태 테이블
 - Decision versioning과 재개 정책
 - 실제 BGE/Chroma index metadata
 - PostgreSQL lock timeout·deadlock 관찰과 다중 worker 부하 테스트
 - 개인정보 보존·삭제와 DB backup 정책
 - 실제 인계 증빙이 필요한 경우 별도 도메인·법적 설계
+- 운영 object storage, malware scan, retention/deletion worker
+- Match 결과에 실행한 `rule_policy_version_id` 고정

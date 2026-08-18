@@ -9,6 +9,7 @@ FastAPI, PostgreSQL, SQLAlchemy와 Alembic으로 구현한 GreenFab Loop MVP Bac
 - [PostgreSQL Schema](../docs/backend-schema.md)
 - [Data Contract v0.1](../docs/data-contract.md)
 - [Golden Demo](../docs/demo-flow.md)
+- [Backend Productization Foundations](../docs/backend-productization.md)
 
 ## 1. Docker Compose로 시작
 
@@ -82,10 +83,15 @@ alembic revision --autogenerate -m "describe change"
 | --- | --- | --- |
 | `DATABASE_URL` | PostgreSQL URL | SQLAlchemy/psycopg 연결 문자열 |
 | `DATABASE_ECHO` | `false` | SQL log 출력 |
+| `DATABASE_POOL_*` | `5 / 10 / 10초` | PostgreSQL connection pool 설정 |
 | `SEED_DEMO_DATA` | `true` | 시작 시 Golden Case와 DEMO Demand upsert |
 | `DEMO_MODE` | `true` | DEMO 기능 context |
 | `DEMO_RESET_ENABLED` | `false` | 로컬 Golden reset 명시 활성화 |
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | 허용 Frontend origin JSON array |
+| `AUTH_MODE` | `demo` | 로컬 명시 Demo 또는 API key 필수 mode |
+| `API_KEY_CREDENTIALS` | `[]` | 평문이 아닌 key SHA-256와 actor/role JSON |
+| `EVIDENCE_*` | `.env.example` 참고 | 로컬 Evidence 경로와 최대 upload 크기 |
+| `DETECT_ARTIFACT_MAX_BYTES` | `20971520` | Detect import artifact 최대 크기 |
 | `POSTGRES_*` | `.env.example` 참고 | Compose PostgreSQL 설정 |
 
 `DEMO_RESET_ENABLED`는 보안상 기본 `false`입니다. 공개 배포에서는 활성화하지 않습니다. 로컬 시연에서만 `DEMO_MODE=true`를 유지하고 `.env`를 다음처럼 바꾼 뒤 Backend를 재시작합니다.
@@ -96,12 +102,28 @@ DEMO_RESET_ENABLED=true
 
 Reset은 `SECOM-0116`에 연결된 Workflow만 초기화하고 다른 Case와 공용 Demand는 보존합니다.
 
-`ENVIRONMENT=production`에서는 다음 두 값을 모두 false로 설정해야 합니다. 하나라도 true이면 설정 검증에서 서버 시작을 거부합니다.
+`ENVIRONMENT`가 `development`, `test`, `local` 외 값이면 다음 세 값을 모두 false로 설정해야
+합니다. 하나라도 true이면 설정 검증에서 서버 시작을 거부합니다.
 
 ```text
+DEMO_MODE=false
 SEED_DEMO_DATA=false
 DEMO_RESET_ENABLED=false
 ```
+
+또한 Production은 `AUTH_MODE=required`와 하나 이상의 hash 기반
+`API_KEY_CREDENTIALS`가 필요합니다. 자세한 role과 설정은
+[`backend-productization.md`](../docs/backend-productization.md)를 참고합니다.
+
+### Detect artifact Import
+
+```bash
+python -m app.cli.import_detect ../data/outputs/detect/dashboard_data.json \
+  --source-type REAL \
+  --actor pipeline_operator
+```
+
+같은 byte hash의 artifact를 재실행해도 import와 Case Audit를 중복 생성하지 않습니다.
 
 ## 5. Golden Case API 순서
 
@@ -213,7 +235,7 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 - Passport의 `quantity`와 `unit`은 API와 DB 모두에서 함께 존재하거나 함께 `null`이어야 합니다.
 - Confirmation은 `PENDING`일 때 확인자·시각이 모두 `null`, 완료 상태일 때 비어 있지 않은 확인자·시각이 모두 존재해야 합니다.
 - 모든 Workflow 변경은 PostgreSQL에서 해당 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 실행합니다.
-- `X-Actor`는 공백 이외 문자를 포함한 1–120자, `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자만 허용합니다.
+- 명시적 Demo mode의 `X-Actor`는 공백 이외 문자를 포함한 1–120자만 허용합니다. Production actor는 API key principal에서 가져옵니다. `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자만 허용합니다.
 - `X-Trace-Id`는 trim 후 1–64자만 재사용하며 빈 값·초과 길이는 서버 UUID로 안전하게 대체합니다.
 - Match/Receipt key 범위는 Case이므로 다른 Case에서 같은 문자열을 재사용할 수 있습니다. 같은 Case의 동시 재시도는 row lock과 DB 제약으로 한 건만 유지합니다.
 - Decision → Match Candidate, Scenario → Decision, Receipt → Decision/Scenario lineage를 FK로 보존합니다.
@@ -233,9 +255,11 @@ Golden signature가 없는 자유 입력은 고정 R01 점수를 재사용하지
 
 ## 9. 후속 TODO
 
-- 인증·조직·RBAC와 actor를 인증 context에서 주입
+- SSO/OIDC, 조직·사업장 tenant, DB-backed key rotation/revocation
 - 자유 Passport 입력을 처리하는 실제 BGE-M3/ChromaDB Adapter와 readiness probe
-- Detect artifact 자동 import
+- MES/QMS 또는 artifact registry에서 Detect artifact를 감지해 CLI를 자동 호출하는 scheduler/connector
 - 범용 idempotency request hash·processing 상태
 - PostgreSQL 기반 동시성·부하 테스트
 - 실제 인계 증빙이 필요할 경우 별도 도메인·법적 검토
+- 운영 object storage, malware scan, retention/deletion worker
+- active Rule policy를 MatchRun에 연결하고 실행 version을 결과에 고정

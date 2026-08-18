@@ -27,6 +27,7 @@ from sqlalchemy.types import JSON
 from app.database import Base
 from app.enums import (
     DecisionStatus,
+    EvidenceType,
     HandoffStatus,
     MatchCandidateStatus,
     MatchRunStatus,
@@ -76,10 +77,50 @@ class TimestampMixin:
     )
 
 
+class DetectImport(Base):
+    __tablename__ = "detect_imports"
+    __table_args__ = (
+        CheckConstraint("case_count >= 0", name="ck_detect_imports_case_count"),
+        CheckConstraint("source_type IN ('REAL', 'DEMO')", name="ck_detect_imports_source_type"),
+    )
+
+    detect_import_id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: _identifier("DETECT")
+    )
+    artifact_sha256: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    artifact_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    dataset_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_revision: Mapped[str] = mapped_column(String(255), nullable=False)
+    validation_method: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type: Mapped[SourceType] = mapped_column(
+        _enum(SourceType, "source_type"), nullable=False
+    )
+    case_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(_json_type(), nullable=False)
+    imported_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    cases: Mapped[list["Case"]] = relationship(back_populates="detect_import")
+
+
 class Case(TimestampMixin, Base):
     __tablename__ = "cases"
     __table_args__ = (
         CheckConstraint("risk_rank IS NULL OR risk_rank >= 1", name="ck_cases_risk_rank"),
+        CheckConstraint(
+            "risk_score IS NULL OR (risk_score >= 0 AND risk_score <= 1)",
+            name="ck_cases_risk_score_range",
+        ),
+        CheckConstraint(
+            "(risk_score IS NULL AND risk_score_type IS NULL) OR "
+            "(risk_score IS NOT NULL AND risk_score_type IS NOT NULL "
+            "AND length(trim(risk_score_type)) > 0)",
+            name="ck_cases_risk_score_metadata",
+        ),
         CheckConstraint("source_type IN ('REAL', 'DEMO')", name="ck_cases_source_type"),
         CheckConstraint(
             "workflow_status IN ('DETECTED', 'CONFIRMATION_PENDING', "
@@ -88,6 +129,7 @@ class Case(TimestampMixin, Base):
             name="ck_cases_workflow_status",
         ),
         Index("ix_cases_workflow_status", "workflow_status"),
+        Index("ix_cases_detect_import_id", "detect_import_id"),
     )
 
     case_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -104,7 +146,13 @@ class Case(TimestampMixin, Base):
         server_default=WorkflowStatus.DETECTED.value,
         nullable=False,
     )
+    detect_import_id: Mapped[str | None] = mapped_column(
+        ForeignKey("detect_imports.detect_import_id", ondelete="SET NULL"), nullable=True
+    )
+    risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_score_type: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    detect_import: Mapped[DetectImport | None] = relationship(back_populates="cases")
     resource_confirmation: Mapped["ResourceConfirmation | None"] = relationship(
         back_populates="case", cascade="all, delete-orphan", uselist=False
     )
@@ -197,6 +245,47 @@ class ResourcePassport(TimestampMixin, Base):
 
     case: Mapped[Case] = relationship(back_populates="resource_passport")
     match_runs: Mapped[list["MatchRun"]] = relationship(back_populates="passport")
+    evidence_items: Mapped[list["PassportEvidence"]] = relationship(
+        back_populates="passport", cascade="all, delete-orphan"
+    )
+
+
+class PassportEvidence(Base):
+    __tablename__ = "passport_evidence"
+    __table_args__ = (
+        CheckConstraint("size_bytes > 0", name="ck_passport_evidence_size"),
+        CheckConstraint(
+            "evidence_type IN ('PHOTO', 'DOCUMENT', 'ANALYSIS_REPORT', 'OTHER')",
+            name="ck_passport_evidence_type",
+        ),
+        CheckConstraint("source_type IN ('REAL', 'DEMO')", name="ck_passport_evidence_source_type"),
+        Index("ix_passport_evidence_passport_created_at", "passport_id", "created_at"),
+    )
+
+    evidence_id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: _identifier("EVIDENCE")
+    )
+    passport_id: Mapped[str] = mapped_column(
+        ForeignKey("resource_passports.passport_id", ondelete="CASCADE"), nullable=False
+    )
+    storage_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_type: Mapped[EvidenceType] = mapped_column(
+        _enum(EvidenceType, "evidence_type"), nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type: Mapped[SourceType] = mapped_column(
+        _enum(SourceType, "source_type"), nullable=False
+    )
+    uploaded_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    passport: Mapped[ResourcePassport] = relationship(back_populates="evidence_items")
 
 
 class Demand(TimestampMixin, Base):
@@ -236,6 +325,53 @@ class Demand(TimestampMixin, Base):
         server_default=SourceType.DEMO.value,
         nullable=False,
     )
+
+
+class RulePolicy(TimestampMixin, Base):
+    __tablename__ = "rule_policies"
+    __table_args__ = (
+        CheckConstraint(
+            "active_version IS NULL OR active_version >= 1", name="ck_rule_active_version"
+        ),
+    )
+
+    policy_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    versions: Mapped[list["RulePolicyVersion"]] = relationship(
+        back_populates="policy",
+        cascade="all, delete-orphan",
+        order_by="RulePolicyVersion.version",
+    )
+
+
+class RulePolicyVersion(Base):
+    __tablename__ = "rule_policy_versions"
+    __table_args__ = (
+        UniqueConstraint("policy_key", "version", name="uq_rule_policy_key_version"),
+        CheckConstraint("version >= 1", name="ck_rule_policy_versions_version"),
+        Index("ix_rule_policy_versions_policy_created_at", "policy_key", "created_at"),
+    )
+
+    rule_policy_version_id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: _identifier("RULEPOLICY")
+    )
+    policy_key: Mapped[str] = mapped_column(
+        ForeignKey("rule_policies.policy_key", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    definition_json: Mapped[dict[str, Any]] = mapped_column(_json_type(), nullable=False)
+    definition_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    policy: Mapped[RulePolicy] = relationship(back_populates="versions")
 
 
 class MatchRun(Base):

@@ -12,11 +12,13 @@ from app.database import SessionLocal
 from app.errors import register_exception_handlers
 from app.seed import seed_demo_data
 from app.services.match import MatchProvider, MockMatchProvider
+from app.storage import EvidenceStorage, LocalEvidenceStorage
 
 
 def create_app(
     *,
     match_provider: MatchProvider | None = None,
+    evidence_storage: EvidenceStorage | None = None,
     seed_on_startup: bool | None = None,
 ) -> FastAPI:
     should_seed = settings.seed_demo_data if seed_on_startup is None else seed_on_startup
@@ -35,12 +37,16 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.match_provider = match_provider or MockMatchProvider()
+    application.state.evidence_storage = evidence_storage or LocalEvidenceStorage(
+        settings.evidence_storage_root
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Trace-Id", "X-Total-Count", "X-Limit", "X-Offset"],
     )
 
     @application.middleware("http")

@@ -76,6 +76,8 @@ stateDiagram-v2
 - 알 수 없는 `condition`, `location`, `composition`은 `null`로 유지합니다.
 - Passport 변경은 Match 실행 전 `RESOURCE_CONFIRMED`, `PASSPORT_READY`에서만 허용합니다.
 - Match 이후 Passport를 바꾸려면 현재 MVP에서는 Demo reset 후 흐름을 다시 실행해야 합니다.
+- Evidence binary upload는 Passport 저장 후 Decision 전인 `PASSPORT_READY`, `MATCH_READY`에서만
+  허용하며 Workflow 상태를 바꾸지 않는 `PASSPORT_EVIDENCE_ADDED` Audit Event를 남깁니다.
 
 ### Match와 Rule
 
@@ -176,7 +178,7 @@ Match의 모델명·snapshot ID 같은 실행 metadata는 `payload_json`에 명�
 
 ## 9. 후속 TODO
 
-- 인증 사용자 기준 actor 주입과 역할별 전이 권한
+- SSO/OIDC, 조직 tenant와 resource-level 권한
 - Decision versioning·HOLD 재개 정책
 - 실제 BGE/Chroma Provider 장애·재시도 상태
 - Idempotency request hash와 처리 중 상태를 저장하는 범용 테이블

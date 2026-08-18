@@ -18,7 +18,8 @@
 ```mermaid
 flowchart LR
     U["현장·환경/자원 담당자"] --> F["Vite / React Frontend"]
-    F -->|"JSON over HTTP /api/v1"| B["FastAPI Backend"]
+    F -->|"JSON over HTTP /api/v1"| A["API Key / Role Boundary"]
+    A --> B["FastAPI Backend"]
 
     B --> W["Workflow Service"]
     W --> P[("PostgreSQL")]
@@ -27,6 +28,8 @@ flowchart LR
     W --> R["Deterministic Rule Service"]
     W --> S["Scenario Service"]
     W --> G["Receipt Service"]
+    W --> E["Passport Evidence Service"]
+    E --> L[("Local dev storage\nFuture object storage")]
 
     DP["Offline Detect Pipeline\nLightGBM · OOF · SHAP"] --> O["dashboard_data.json"]
     O --> D
@@ -45,9 +48,9 @@ flowchart LR
 | --- | --- | --- |
 | Frontend | Case 조회, 사용자 입력, 단계별 결과 표시, 오류·재시도 UX | 상태 전이 우회, AI 판단 생성, 브라우저 메모리를 최종 저장소로 사용 |
 | FastAPI | API, 입력 검증, 트랜잭션, 상태 전이, Provider 호출, 응답 조립 | 요청마다 Detect 모델 학습, 의미 유사도를 최종 적합성으로 해석 |
-| PostgreSQL | Case, 확인, Passport, Demand 원본, Match 실행, Decision, Scenario, Receipt, Audit 저장 | 벡터 최근접 검색 |
+| PostgreSQL | Case, Detect provenance, 확인, Passport/Evidence metadata, Demand, Match, Decision, Scenario, Receipt, Audit, Rule policy 저장 | 벡터 최근접 검색, evidence binary 저장 |
 | Offline Detect | 동일 Fold 모델 비교, LightGBM/OOF/SHAP 결과 생성 | Resource·폐기물·재활용 정보를 추론 |
-| Detect Seed / Adapter | 검증된 Detect 산출물을 Data Contract의 `case`로 변환·적재 | 원본 결과에 공정 의미를 임의 부여 |
+| Detect Import | 검증된 Detect 산출물을 hash 기반으로 idempotent Case upsert | 원본 결과에 공정 의미를 임의 부여, 기존 Workflow 초기화 |
 | BGE-M3 / ChromaDB | Passport 텍스트와 DEMO Demand 텍스트의 Top-k 의미 유사도 검색 | 안전성·성공확률·실제 산업 적합성 판단 |
 | Rule Service | 수량, 필수정보, 위치 등 명시적 조건의 결정론적 검사 | LLM 기반 조건 생성, 최종 승인·거절 |
 | Human Decision | 후보 선택과 `APPROVED`, `HOLD`, `REJECTED` 입력 | AI가 대신 수행할 수 없음 |
@@ -57,7 +60,7 @@ flowchart LR
 ## 4. 실행 파이프라인
 
 1. Offline Detect Pipeline이 실제 SECOM 입력으로 위험 순위와 SHAP 결과를 생성합니다.
-2. 현재 MVP seed가 검증 산출물에서 확인한 Golden Case 필드를 `case` 형식으로 PostgreSQL에 적재합니다. 파일 자동 import Adapter는 후속 범위입니다.
+2. Golden seed 또는 Detect CLI가 검증 산출물을 `case`와 provenance 형식으로 PostgreSQL에 적재합니다.
 3. 사람이 실제 Resource 발생 여부를 `CONFIRMED` 또는 `NOT_CONFIRMED`로 입력합니다.
 4. `CONFIRMED`인 경우에만 DEMO Resource Passport를 저장합니다.
 5. Backend가 Passport를 현재 설정된 Match Provider에 전달합니다.
@@ -104,6 +107,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - Match 실행 당시 모델명, 후보, Rule 결과 보관
 - 사용자 Decision과 Audit Event 보관
 - Scenario 입력·결과와 Receipt 스냅샷 보관
+- Detect import hash/model provenance, Evidence metadata, versioned Rule policy 보관
 - API 쓰기는 트랜잭션과 상태 검사를 통과해야 함
 
 ### ChromaDB
@@ -118,7 +122,8 @@ MatchProvider.match(passport, top_k) -> MatchResult
 
 - Detect 학습·OOF·SHAP은 오프라인 산출물로 관리합니다.
 - 현재 seed 값은 검증된 `dashboard_data.json` 산출물에서 복사한 값이며 API 요청 중 모델을 재학습하지 않습니다.
-- 파일을 직접 읽는 Detect Adapter는 후속 범위입니다.
+- CLI import는 artifact hash를 기준으로 Case를 upsert하고 기존 Workflow 진행 상태를 보존합니다.
+- Evidence binary는 Git/DB에 넣지 않고 개발 환경의 generated-key local storage에 저장합니다.
 - 원본 SECOM 데이터와 비밀값은 Git에 포함하지 않습니다.
 
 ## 7. 출처와 해석 경계
@@ -140,7 +145,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - 잘못된 단계 요청은 `409 INVALID_STATE`로 거절합니다.
 - Match와 Receipt는 선택적 `Idempotency-Key`를 지원하며 UI에서는 매번 전송하는 것을 권장합니다.
 - Scenario는 Case당 하나만 저장하고 재요청 시 같은 결과를 반환합니다.
-- PostgreSQL 연결이 실패하면 readiness가 실패합니다. 현재 응답은 주입된 Provider class 이름도 함께 표시합니다.
+- PostgreSQL 또는 Evidence storage 접근이 실패하면 readiness가 실패합니다. 응답은 주입된 Provider class 이름도 함께 표시합니다.
 - 미완성 객체를 저장하고 성공 응답을 반환하지 않습니다.
 - 모든 오류 응답에는 추적 가능한 `trace_id`를 포함합니다.
 - 같은 Case의 동시 상태 전이는 PostgreSQL row lock으로 직렬화합니다. 제품화 전에는 lock timeout·deadlock 관찰과 다중 worker 부하 테스트를 추가합니다.
@@ -161,7 +166,8 @@ chroma       실제 BGE Provider 추가 후 선택적으로 구성
 - `/api/v1/demo/reset`은 로컬 시연에서 `DEMO_RESET_ENABLED=true`일 때만 사용하고 공개 배포에서는 기본 비활성 상태를 유지합니다.
 - `GET /health/live`는 프로세스 생존 여부, `GET /health/ready`는 DB 연결과 주입된 Provider 이름을 확인합니다.
 - 스키마 변경은 Alembic migration으로만 적용합니다.
-- 운영 배포 전에는 인증·권한, 비밀 관리, 개인정보 처리, 백업 정책을 별도로 설계해야 합니다.
+- Production은 hash 기반 API key와 role을 필수로 사용합니다. SSO/OIDC, tenant,
+  key lifecycle, 개인정보 처리와 백업 정책은 별도 설계해야 합니다.
 
 ## 10. MVP 비범위
 
@@ -171,12 +177,15 @@ chroma       실제 BGE Provider 추가 후 선택적으로 구성
 - 법적 전자서명 또는 불변 원장
 - 실제 인계 완료를 확인하는 외부 증빙
 - 검증되지 않은 탄소·전력·폐기물 감축계수
-- 멀티테넌시와 세분화된 권한 관리
+- 멀티테넌시, SSO/OIDC와 세분화된 resource-level 권한 관리
+- Evidence의 운영 object storage·malware scan·retention
 
 ## 11. 후속 구현 TODO
 
-- 운영 사용자 인증·조직·권한 모델
+- 운영 SSO/OIDC·조직 tenant와 API key rotation/revocation
 - 실제 `BAAI/bge-m3` CPU-first Adapter와 ChromaDB lifecycle
 - Provider 선택 환경변수와 실제 모델 readiness probe
-- Detect 산출물 자동 import Adapter
+- Detect import scheduler와 MES/QMS connector
+- active Rule policy version을 Match/Rule 실행 결과에 연결
+- Evidence object storage, malware scan, retention/deletion worker
 - 실제 인계 증빙이 필요할 경우 별도의 정책·API·법적 검토

@@ -354,6 +354,7 @@ def test_health_checks_database_and_match_provider(client) -> None:
         "status": "ready",
         "database": "ok",
         "match_provider": "MockMatchProvider",
+        "evidence_storage": "LocalEvidenceStorage",
     }
 
 

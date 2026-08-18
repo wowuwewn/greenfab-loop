@@ -11,10 +11,12 @@
 - `source_type`: `REAL`, `DEMO`, `SCENARIO`만 허용
 - 상태 변경 API: 성공 시 최신 전체 Case envelope 반환
 - 응답의 `X-Trace-Id`: 요청 추적 ID. 요청에서 같은 헤더를 보내면 재사용
-- 요청 문자열은 앞뒤 공백을 제거하며, `confirmed_by`, Passport `description`, Decision `reason`·`decided_by` 같은 필수 문자열은 공백만 입력하면 `422 VALIDATION_ERROR`
+- 요청 문자열은 앞뒤 공백을 제거하며 Passport `description`, Decision `reason` 같은 필수 문자열은 공백만 입력하면 `422 VALIDATION_ERROR`
 - Workflow 변경 API는 PostgreSQL에서 대상 Case를 `SELECT ... FOR UPDATE`로 잠근 뒤 상태를 검사
 
-인증·권한은 MVP 비범위입니다. `confirmed_by`, `decided_by` 또는 `X-Actor`로 actor를 받으며 운영 전에는 인증 주체에서 가져오도록 변경해야 합니다.
+인증은 [`backend-productization.md`](./backend-productization.md)의 API key/role 경계를
+따릅니다. Production에서는 `X-API-Key`가 필수이고 actor는 key principal에서 주입합니다.
+명시적 로컬 `AUTH_MODE=demo`에서만 `X-Actor`와 body actor를 사용할 수 있습니다.
 
 ### Case envelope
 
@@ -49,6 +51,8 @@
 
 | HTTP | `code` | 의미 |
 | --- | --- | --- |
+| 401 | `AUTH_REQUIRED` | API key가 없거나 유효하지 않음 |
+| 403 | `FORBIDDEN` | 현재 role에 작업 권한이 없음 |
 | 404 | `CASE_NOT_FOUND` | Case가 없음 |
 | 404 | `RECEIPT_NOT_FOUND` | Receipt가 없음 |
 | 404 | `NOT_FOUND` | Demo reset 등 비활성 기능 |
@@ -57,16 +61,22 @@
 | 409 | `CANDIDATE_NOT_REVIEWABLE` | `REVIEW`가 아닌 후보를 승인하려 함 |
 | 409 | `RECEIPT_ALREADY_EXISTS` | 기존 Receipt와 다른 key로 다시 생성하려 함 |
 | 422 | `VALIDATION_ERROR` | Pydantic 필드·도메인 검증 실패 |
+| 413 | `EVIDENCE_TOO_LARGE` | Evidence upload 제한 초과 |
 | 503 | `MATCH_UNAVAILABLE` | 주입된 Match Provider 실행 실패 |
 | 503 | `DATABASE_UNAVAILABLE` | SQLAlchemy/PostgreSQL 요청 처리 실패 |
 | 500 | `INTEGRITY_ERROR`, `MATCH_DATA_ERROR` | 저장 관계 또는 DEMO Demand가 불완전함 |
 | 500 | `INTERNAL_ERROR` | 처리되지 않은 예외의 안전한 공통 응답 |
 
-FastAPI 기본 422도 위 형식으로 정규화합니다. API router는 404, 409, 422, 500, 503의 공통 `ErrorResponse`를 OpenAPI에 선언합니다. 내부 stack trace와 비밀값은 응답하지 않고 서버 log에 `trace_id`와 함께 기록합니다.
+FastAPI 기본 422도 위 형식으로 정규화합니다. API router는 401, 403, 404, 409, 413,
+422, 500, 503의 공통 `ErrorResponse`를 OpenAPI에 선언합니다. 내부 stack trace와 비밀값은
+응답하지 않고 서버 log에 `trace_id`와 함께 기록합니다.
 
-## 3. Actor와 중복 요청
+## 3. 인증 Actor와 중복 요청
 
-- Passport, Match, ESG Scenario, Receipt는 선택적 `X-Actor`를 받으며 기본값은 `demo_operator`입니다.
+- Production actor는 `X-API-Key` credential의 actor입니다. Client가 보낸 `X-Actor`,
+  `confirmed_by`, `decided_by`는 인증 actor를 덮어쓸 수 없습니다.
+- `AUTH_MODE=demo`에서만 `X-Actor` 또는 기존 body actor를 사용하고 기본값은
+  `demo_operator`입니다.
 - Match와 Receipt는 선택적 `Idempotency-Key`를 지원합니다. Frontend에서는 중복 클릭 방지를 위해 항상 보내는 것을 권장합니다.
 - `X-Actor`는 공백 이외 문자를 포함한 1–120자, `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자여야 합니다. 공백-only 또는 길이 초과 header는 `422`입니다.
 - 요청 `X-Trace-Id`는 trim 후 1–64자일 때만 사용합니다. 비어 있거나 64자를 넘으면 요청을 실패시키지 않고 서버가 안전한 UUID를 새로 생성합니다.
@@ -82,18 +92,19 @@ FastAPI 기본 422도 위 형식으로 정규화합니다. API router는 404, 40
 ### `GET /health` 또는 `GET /health/live`
 
 ```json
-{"status": "ok", "database": null, "match_provider": null}
+{"status": "ok", "database": null, "match_provider": null, "evidence_storage": null}
 ```
 
 ### `GET /health/ready`
 
-PostgreSQL `SELECT 1`을 실행하고 주입된 Provider class를 표시합니다.
+PostgreSQL `SELECT 1`과 Evidence storage 접근성을 확인하고 주입된 Provider class를 표시합니다.
 
 ```json
 {
   "status": "ready",
   "database": "ok",
-  "match_provider": "MockMatchProvider"
+  "match_provider": "MockMatchProvider",
+  "evidence_storage": "LocalEvidenceStorage"
 }
 ```
 
@@ -101,7 +112,7 @@ PostgreSQL `SELECT 1`을 실행하고 주입된 Provider class를 표시합니�
 
 ### `GET /api/v1/cases`
 
-현재 MVP의 전체 Case summary 목록을 단순 배열로 반환합니다.
+현재 page window의 Case summary를 기존 호환용 단순 배열로 반환합니다.
 
 ```json
 [
@@ -115,7 +126,9 @@ PostgreSQL `SELECT 1`을 실행하고 주입된 Provider class를 표시합니�
 ]
 ```
 
-Pagination과 검색 필터는 후속 범위입니다.
+배열 응답 호환성을 유지하면서 `limit`(1~100), `offset`, `search` Case ID 대소문자 무시 substring,
+`workflow_status` query를 지원합니다. 전체 건수와 현재 window는 `X-Total-Count`, `X-Limit`,
+`X-Offset` response header로 반환합니다.
 
 ### `GET /api/v1/cases/{case_id}`
 
@@ -136,6 +149,8 @@ Errors: `404 CASE_NOT_FOUND`
 - 입력 `status`: `CONFIRMED`, `NOT_CONFIRMED`. `PENDING`은 서버 초기 상태입니다.
 - `source_type`은 서버가 MVP에서 `DEMO`로 유지합니다.
 - 서버가 `confirmed_at`을 생성합니다.
+- Production에서는 `confirmed_by`를 생략할 수 있고 인증 actor를 저장합니다. Demo body 값은
+  이전 시연 호환을 위해 유지합니다.
 - 완료 상태는 trim 후 비어 있지 않은 `confirmed_by`와 `confirmed_at`을 함께 가져야 하며 DB Check Constraint도 같은 조건을 보장합니다.
 - `NOT_CONFIRMED`이면 Case가 `CLOSED`로 끝나고 이후 객체는 `null`입니다.
 - 같은 상태와 확인자를 다시 보내면 기존 결과를 반환합니다.
@@ -147,7 +162,7 @@ Errors: `404 CASE_NOT_FOUND`, `409 INVALID_STATE`, `422 VALIDATION_ERROR`
 
 ### `PUT /api/v1/cases/{case_id}/resource-passport`
 
-Headers: `X-Actor` 선택
+Headers: Production `X-API-Key`, 명시적 Demo에서만 `X-Actor` 선택
 
 ```json
 {
@@ -175,7 +190,7 @@ Errors: `404 CASE_NOT_FOUND`, `409 INVALID_STATE`, `422 VALIDATION_ERROR`
 
 ### `POST /api/v1/cases/{case_id}/matches`
 
-Headers: `Idempotency-Key`, `X-Actor` 선택
+Headers: `Idempotency-Key`, Production `X-API-Key`, 명시적 Demo에서만 `X-Actor` 선택
 
 ```json
 {"top_k": 3}
@@ -246,6 +261,7 @@ Rule status 우선순위:
 - Backend는 선택한 `demand_id`와 함께 내부 `selected_match_candidate_id` FK를 저장해 실제 검토 후보까지 추적합니다.
 - `NEEDS_INFO`, `RULE_FAIL` override는 구현하지 않습니다.
 - 서버가 `decided_at`을 생성합니다.
+- Production에서는 `decided_by`를 생략할 수 있고 인증 actor를 저장합니다.
 
 Response `200`: 최신 Case envelope
 Errors: `409 INVALID_STATE`, `409 INVALID_CANDIDATE`, `409 CANDIDATE_NOT_REVIEWABLE`, `422 VALIDATION_ERROR`
@@ -254,7 +270,7 @@ Errors: `409 INVALID_STATE`, `409 INVALID_CANDIDATE`, `409 CANDIDATE_NOT_REVIEWA
 
 ### `POST /api/v1/cases/{case_id}/esg-scenario`
 
-Headers: `X-Actor` 선택
+Headers: Production `X-API-Key`, 명시적 Demo에서만 `X-Actor` 선택
 Request body: 없음
 
 ```json
@@ -289,7 +305,7 @@ Errors: `409 INVALID_STATE`
 
 ### `POST /api/v1/cases/{case_id}/receipt`
 
-Headers: `Idempotency-Key`, `X-Actor` 선택
+Headers: `Idempotency-Key`, Production `X-API-Key`, 명시적 Demo에서만 `X-Actor` 선택
 Request body: 없음
 
 - `SCENARIO_READY`, `RECEIPT_CREATED`에서 허용합니다.
@@ -334,14 +350,23 @@ Request body: 없음
 - 로컬 시연 전용 `DEMO_MODE=true`와 `DEMO_RESET_ENABLED=true`가 모두 설정됐을 때만 활성화하며 reset flag 기본값은 `false`입니다.
 - Golden Case `SECOM-0116`에 연결된 Workflow만 초기화하고 해당 Golden Case를 결정적으로 다시 seed합니다.
 - 다른 Case와 공용 Demand는 보존합니다.
+- Golden Case의 local Passport Evidence binary도 best-effort로 제거하고 실패를 서버 log에 남깁니다.
 - REAL 출처의 Golden Detect 값은 같은 검증 산출물 값으로 복원합니다.
 - 공개 배포에서는 비활성 기본을 유지하고, 비활성 상태에서는 404로 숨깁니다.
-- `ENVIRONMENT=production`에서는 `SEED_DEMO_DATA` 또는 `DEMO_RESET_ENABLED`가 true이면 설정 검증에서 애플리케이션 시작 자체를 거부합니다.
+- `development|test|local` 외 환경에서는 `DEMO_MODE`, `SEED_DEMO_DATA`,
+  `DEMO_RESET_ENABLED` 중 하나라도 true이면 설정 검증에서 애플리케이션 시작 자체를 거부합니다.
 
 Response `200`: 초기화된 Golden Case envelope
 Errors: `404 NOT_FOUND`
 
-## 13. Contract test 최소 목록
+## 13. Evidence와 Rule Policy API
+
+Passport Evidence upload/list/download와 versioned Rule policy catalog는
+[`backend-productization.md`](./backend-productization.md)에 정의합니다. Evidence는 7-key
+CaseEnvelope를 확장하지 않는 별도 endpoint이며, Rule catalog는 현재 Match 실행에 아직 연결되지
+않습니다.
+
+## 14. Contract test 최소 목록
 
 - 상세 응답의 7개 top-level key와 `snake_case`
 - 미도달 단계 `null`
@@ -356,10 +381,10 @@ Errors: `404 NOT_FOUND`
 - Match·Receipt 중복 요청 처리
 - 모든 오류의 `trace_id`
 
-## 14. 후속 TODO
+## 15. 후속 TODO
 
-- 운영 인증·조직·RBAC와 actor header 제거
-- Pagination, 검색, 정렬
+- SSO/OIDC, 조직·사업장 tenant와 DB-backed key lifecycle
+- 정렬 option과 cursor pagination
 - 범용 idempotency request hash·처리 상태 저장
 - 자유 Passport 입력을 처리하는 실제 BGE/Chroma Adapter 설정과 readiness
 - OpenAPI example·frontend client 자동 생성

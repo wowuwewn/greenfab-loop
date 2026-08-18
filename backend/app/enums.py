@@ -56,3 +56,17 @@ class HandoffStatus(DomainEnum):
     RESOURCE_CONFIRMED = "RESOURCE_CONFIRMED"
     APPROVED = "APPROVED"
     HANDOFF_CONFIRMED = "HANDOFF_CONFIRMED"
+
+
+class EvidenceType(DomainEnum):
+    PHOTO = "PHOTO"
+    DOCUMENT = "DOCUMENT"
+    ANALYSIS_REPORT = "ANALYSIS_REPORT"
+    OTHER = "OTHER"
+
+
+class ApiRole(DomainEnum):
+    VIEWER = "VIEWER"
+    OPERATOR = "OPERATOR"
+    DECISION_MAKER = "DECISION_MAKER"
+    ADMIN = "ADMIN"
