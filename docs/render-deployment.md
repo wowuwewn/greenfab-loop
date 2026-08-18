@@ -17,6 +17,8 @@ Internet
 ```
 
 - `preDeployCommand: alembic upgrade head`가 새 release 전에 DB migration을 실행합니다.
+- 저장소 기본 branch `main`에는 아직 이 backend가 없으므로 Blueprint와 Web Service 모두
+  `dev`를 명시합니다. 운영 승격 후에는 검증된 `main` commit으로 함께 변경합니다.
 - build는 Python 3.12.11을 고정하고 `scripts/install_match_runtime.sh`를 실행합니다. 이
   script는 공식 PyTorch CPU index에서 torch 2.7.1을 먼저 설치한 뒤 BGE dependencies를
   설치하며, CUDA build가 들어오면 즉시 실패합니다.
