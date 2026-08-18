@@ -31,6 +31,7 @@ interface ReviewPageProps {
 interface DecisionErrors {
   status?: string
   candidate?: string
+  reason?: string
 }
 
 const candidateStatusLabels: Record<MatchCandidate['status'], string> = {
@@ -61,7 +62,7 @@ const ruleLabels = [
 const ruleValueLabel = (value: boolean | null) => {
   if (value === true) return '조건 충족'
   if (value === false) return '조건 불충족'
-  return '확인 정보 없음'
+  return '미평가'
 }
 
 const ruleValueClass = (value: boolean | null) => {
@@ -117,13 +118,26 @@ export function ReviewPage({
     if (!hasCandidates) return
 
     const nextErrors: DecisionErrors = {}
+    const trimmedReason = reason.trim()
 
     if (!decisionStatus) {
       nextErrors.status = '최종 결정 상태를 선택해주세요.'
     }
 
-    if (decisionStatus === 'APPROVED' && !selectedDemandId) {
+    if (decisionStatus === 'APPROVED' && !selectedCandidate) {
       nextErrors.candidate = '승인할 활용 후보를 먼저 선택해주세요.'
+    }
+
+    if (
+      decisionStatus === 'APPROVED' &&
+      selectedCandidate &&
+      selectedCandidate.status !== 'REVIEW'
+    ) {
+      nextErrors.candidate = '검토 가능 상태의 후보만 승인할 수 있습니다.'
+    }
+
+    if (!trimmedReason) {
+      nextErrors.reason = '결정 사유를 입력해주세요.'
     }
 
     if (Object.keys(nextErrors).length > 0 || !decisionStatus) {
@@ -134,7 +148,7 @@ export function ReviewPage({
     onDecisionChange({
       status: decisionStatus,
       selected_demand_id: selectedDemandId,
-      reason: reason.trim() || null,
+      reason: trimmedReason,
       decided_by: 'demo_reviewer',
       decided_at: new Date().toISOString(),
     })
@@ -343,14 +357,21 @@ export function ReviewPage({
                 </div>
 
                 <label className="decision-reason-field">
-                  <span>결정 사유 <em>선택사항</em></span>
+                  <span>결정 사유 <em>필수</em></span>
                   <textarea
                     rows={4}
                     placeholder="승인·보류·거절 사유를 간단히 입력해주세요."
                     value={reason}
-                    onChange={(event) => setReason(event.target.value)}
+                    onChange={(event) => {
+                      setReason(event.target.value)
+                      setErrors((current) => ({ ...current, reason: undefined }))
+                    }}
                     disabled={!hasCandidates}
+                    aria-invalid={Boolean(errors.reason)}
                   />
+                  {errors.reason && (
+                    <strong className="review-field-error">{errors.reason}</strong>
+                  )}
                 </label>
 
                 <button className="primary-button review-save-button" type="button" onClick={saveDecision} disabled={!hasCandidates}>
