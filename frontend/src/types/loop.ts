@@ -5,10 +5,15 @@ export type ResourceConfirmationStatus =
   | 'CONFIRMED'
   | 'NOT_CONFIRMED'
 
+export interface ShapFeature {
+  feature_name: string
+  shap_value: number
+}
+
 export interface DetectCase {
   case_id: string
   risk_rank: number | null
-  shap_top_features: null
+  shap_top_features: ShapFeature[] | null
   source_type: SourceType
 }
 

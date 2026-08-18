@@ -63,7 +63,7 @@ const ruleLabels = [
 const ruleValueLabel = (value: boolean | null) => {
   if (value === true) return '조건 충족'
   if (value === false) return '조건 불충족'
-  return '확인 정보 없음'
+  return '미평가'
 }
 
 const ruleValueClass = (value: boolean | null) => {
@@ -111,7 +111,9 @@ export function ReceiptPage({
 }: ReceiptPageProps) {
   const hasCandidates = Boolean(match && match.candidates.length > 0)
   const selectedCandidate = findSelectedCandidate(match, decision)
-  const canCreateReceipt = Boolean(caseData && resourcePassport && decision)
+  const canCreateReceipt = Boolean(
+    caseData && resourcePassport && decision && esgScenario,
+  )
   const completedStepIndexes = decision ? [0, 1, 2, 3, 4] : [0, 1, 2]
 
   if (!decision && hasCandidates) completedStepIndexes.push(3)
@@ -349,8 +351,9 @@ export function ReceiptPage({
                 <div>
                   <strong>Green Receipt 생성</strong>
                   <p>
-                    생산 건, Resource Passport, 사람의 최종 결정이 모두 있어야
-                    기록을 생성할 수 있습니다.
+                    {esgScenario
+                      ? '생산 건, Resource Passport, 사람의 최종 결정이 모두 있어야 기록을 생성할 수 있습니다.'
+                      : 'ESG 시나리오 계산까지 완료하면 Green Receipt를 생성할 수 있습니다.'}
                   </p>
                 </div>
                 <button

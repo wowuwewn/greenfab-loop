@@ -32,6 +32,7 @@ interface PassportFormValues {
 interface PassportFormErrors {
   description?: string
   quantity?: string
+  unit?: string
 }
 
 const PASSPORT_ID = 'PASSPORT-DEMO-0116'
@@ -70,8 +71,16 @@ export function PassportPage({
 
   const updateField = (field: keyof PassportFormValues, value: string) => {
     setFormValues((current) => ({ ...current, [field]: value }))
-    if (field === 'description' || field === 'quantity') {
-      setErrors((current) => ({ ...current, [field]: undefined }))
+    if (field === 'description') {
+      setErrors((current) => ({ ...current, description: undefined }))
+    }
+
+    if (field === 'quantity' || field === 'unit') {
+      setErrors((current) => ({
+        ...current,
+        quantity: undefined,
+        unit: undefined,
+      }))
     }
   }
 
@@ -81,8 +90,10 @@ export function PassportPage({
 
     const nextErrors: PassportFormErrors = {}
     const description = formValues.description.trim()
+    const quantityInput = formValues.quantity.trim()
+    const unit = formValues.unit.trim()
     const quantity =
-      formValues.quantity.trim() === '' ? null : Number(formValues.quantity)
+      quantityInput === '' ? null : Number(formValues.quantity)
 
     if (!description) {
       nextErrors.description = '후보 탐색을 위해 자원 설명을 입력해주세요.'
@@ -95,6 +106,14 @@ export function PassportPage({
       nextErrors.quantity = '수량은 0 이상의 숫자로 입력해주세요.'
     }
 
+    if (quantityInput && !unit) {
+      nextErrors.unit = '수량을 입력한 경우 단위도 입력해주세요.'
+    }
+
+    if (unit && !quantityInput) {
+      nextErrors.quantity = '단위를 입력한 경우 수량도 입력해주세요.'
+    }
+
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
       return
@@ -104,7 +123,7 @@ export function PassportPage({
       passport_id: PASSPORT_ID,
       description,
       quantity,
-      unit: optionalText(formValues.unit),
+      unit: unit || null,
       condition: optionalText(formValues.condition),
       location: optionalText(formValues.location),
       composition: optionalText(formValues.composition),
@@ -263,7 +282,14 @@ export function PassportPage({
                     placeholder="예: kg"
                     value={formValues.unit}
                     onChange={(event) => updateField('unit', event.target.value)}
+                    aria-invalid={hasSubmitted && Boolean(errors.unit)}
+                    aria-describedby="unit-error"
                   />
+                  {hasSubmitted && errors.unit && (
+                    <strong className="passport-field__error" id="unit-error">
+                      {errors.unit}
+                    </strong>
+                  )}
                 </label>
 
                 <label className="passport-field">
