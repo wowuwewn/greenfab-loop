@@ -5,7 +5,6 @@ import {
   Check,
   CheckCircle2,
   RefreshCw,
-  RotateCcw,
   UserCheck,
   X,
 } from 'lucide-react'
@@ -30,6 +29,7 @@ interface ConfirmPageProps {
   resourceConfirmation: ResourceConfirmation
   onSelect: (status: ConfirmedStatus) => Promise<void>
   onBackToDetect: () => void
+  onBackToOverview: () => void
   onGoToPassport: () => void
 }
 
@@ -40,17 +40,12 @@ export function ConfirmPage({
   resourceConfirmation,
   onSelect,
   onBackToDetect,
+  onBackToOverview,
   onGoToPassport,
 }: ConfirmPageProps) {
   const { status } = resourceConfirmation
-  const [isChoosing, setIsChoosing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [apiError, setApiError] = useState<ApiError | null>(null)
-
-  const resetSelection = () => {
-    setApiError(null)
-    setIsChoosing(true)
-  }
 
   const selectStatus = async (nextStatus: ConfirmedStatus) => {
     setIsSaving(true)
@@ -58,7 +53,6 @@ export function ConfirmPage({
 
     try {
       await onSelect(nextStatus)
-      setIsChoosing(false)
     } catch (error) {
       setApiError(toApiError(error))
     } finally {
@@ -189,7 +183,7 @@ export function ConfirmPage({
             </span>
           </div>
 
-          {(status === 'PENDING' || isChoosing) && (
+          {status === 'PENDING' && (
             <div className="confirmation-options">
               <button
                 className="confirmation-option confirmation-option--neutral"
@@ -224,7 +218,7 @@ export function ConfirmPage({
 
           <ApiErrorMessage error={apiError} />
 
-          {status === 'CONFIRMED' && !isChoosing && (
+          {status === 'CONFIRMED' && (
             <div className="confirmation-result confirmation-result--confirmed">
               <CheckCircle2 size={24} strokeWidth={1.9} aria-hidden="true" />
               <div className="confirmation-result__copy">
@@ -240,33 +234,28 @@ export function ConfirmPage({
                   자원 정보 작성으로 이동
                   <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
                 </button>
-                <button className="confirm-reset-button" type="button" onClick={resetSelection}>
-                  <RotateCcw size={14} strokeWidth={1.9} aria-hidden="true" />
-                  다시 선택
-                </button>
               </div>
             </div>
           )}
 
-          {status === 'NOT_CONFIRMED' && !isChoosing && (
+          {status === 'NOT_CONFIRMED' && (
             <div className="confirmation-result confirmation-result--empty">
               <X size={24} strokeWidth={1.9} aria-hidden="true" />
               <div className="confirmation-result__copy">
-                <strong>이번 Case에서는 확인된 자원이 없습니다.</strong>
-                <p>자원이 확인되지 않아 이 Case의 자원 순환 검토를 종료합니다.</p>
+                <strong>자원 미발생 확인 · 검토 종료</strong>
+                <p>
+                  이 Case는 종료되어 확인 결과를 변경할 수 없습니다. 서버에
+                  기록된 결과를 조회 전용으로 표시합니다.
+                </p>
               </div>
               <div className="confirmation-result__actions">
                 <button
                   className="primary-button confirmation-result__primary"
                   type="button"
-                  onClick={onBackToDetect}
+                  onClick={onBackToOverview}
                 >
-                  위험 선별로 돌아가기
+                  Case 목록으로 돌아가기
                   <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
-                </button>
-                <button className="confirm-reset-button" type="button" onClick={resetSelection}>
-                  <RotateCcw size={14} strokeWidth={1.9} aria-hidden="true" />
-                  다시 선택
                 </button>
               </div>
             </div>

@@ -135,7 +135,7 @@ const casePath = (caseId: string) =>
 
 export const api = {
   listCases: (signal?: AbortSignal) =>
-    request<CaseSummary[]>('/api/v1/cases', { signal }),
+    request<CaseSummary[]>('/api/v1/cases?limit=100&offset=0', { signal }),
   getCase: (caseId: string, signal?: AbortSignal) =>
     request<CaseEnvelope>(casePath(caseId), { signal }),
   confirmResource: (caseId: string, payload: ResourceConfirmationRequest) =>

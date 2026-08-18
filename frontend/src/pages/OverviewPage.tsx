@@ -2,15 +2,29 @@ import { useState } from 'react'
 import { ArrowRight, RefreshCw } from 'lucide-react'
 import { toApiError, type ApiError } from '../api/client'
 import { ApiErrorMessage } from '../components/ApiErrorMessage'
+import { CaseQueue } from '../components/CaseQueue'
 import { DataLegend } from '../components/DataLegend'
 import { ServiceFlowVisual } from '../components/ServiceFlowVisual'
+import type { CaseSummary } from '../types/loop'
 import '../overview.css'
 
 interface OverviewPageProps {
+  cases: CaseSummary[]
+  recommendedCaseId: string | null
+  selectedCaseId: string | null
+  isCaseLoading: boolean
   onStartDemo: () => Promise<void>
+  onOpenCase: (summary: CaseSummary) => Promise<void>
 }
 
-export function OverviewPage({ onStartDemo }: OverviewPageProps) {
+export function OverviewPage({
+  cases,
+  recommendedCaseId,
+  selectedCaseId,
+  isCaseLoading,
+  onStartDemo,
+  onOpenCase,
+}: OverviewPageProps) {
   const [isStarting, setIsStarting] = useState(false)
   const [apiError, setApiError] = useState<ApiError | null>(null)
 
@@ -82,6 +96,16 @@ export function OverviewPage({ onStartDemo }: OverviewPageProps) {
 
           <ServiceFlowVisual />
         </section>
+
+        <div className="overview-operations page-container">
+          <CaseQueue
+            cases={cases}
+            recommendedCaseId={recommendedCaseId}
+            selectedCaseId={selectedCaseId}
+            isLoading={isCaseLoading}
+            onOpenCase={onOpenCase}
+          />
+        </div>
 
         <div className="overview-details page-container">
           <DataLegend />
