@@ -117,7 +117,10 @@ export interface EsgScenario {
   factor_source: string | null
 }
 
-export type ReceiptHandoffStatus = 'RESOURCE_CONFIRMED' | 'APPROVED'
+export type ReceiptHandoffStatus =
+  | 'RESOURCE_CONFIRMED'
+  | 'APPROVED'
+  | 'HANDOFF_CONFIRMED'
 
 export interface Receipt {
   receipt_id: string
@@ -126,7 +129,7 @@ export interface Receipt {
   selected_demand_id: string | null
   decision_status: DecisionStatus
   handoff_status: ReceiptHandoffStatus
-  created_at: string
+  created_at: string | null
 }
 
 export interface BackendEsgScenario {
@@ -137,15 +140,7 @@ export interface BackendEsgScenario {
   factor_source: string | null
 }
 
-export interface BackendReceipt {
-  receipt_id: string
-  case_id: string
-  passport_id: string
-  selected_demand_id: string | null
-  decision_status: DecisionStatus
-  handoff_status: string
-  created_at: string | null
-}
+export type BackendReceipt = Receipt
 
 export interface CaseEnvelope {
   case: DetectCase

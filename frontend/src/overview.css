@@ -395,6 +395,33 @@
   padding-bottom: 8px;
 }
 
+.overview-scope-note {
+  display: flex;
+  gap: 8px 12px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.overview-scope-note strong {
+  flex: 0 0 auto;
+  color: var(--color-green-dark);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.overview-scope-note p {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.overview-scope-note span {
+  min-width: 0;
+}
+
 .data-legend {
   display: flex;
   gap: 12px;
@@ -527,7 +554,8 @@
   }
 
   .data-legend,
-  .data-legend ul {
+  .data-legend ul,
+  .overview-scope-note {
     align-items: flex-start;
     flex-direction: column;
   }

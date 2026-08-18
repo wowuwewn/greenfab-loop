@@ -322,6 +322,7 @@
   margin-top: 16px;
   padding: 14px 16px;
   border-radius: var(--radius-md);
+  animation: confirm-result-enter 300ms ease-out both;
 }
 
 .confirmation-result--confirmed {
@@ -387,6 +388,18 @@
 
 .confirm-inline-notice {
   justify-content: flex-end;
+}
+
+@keyframes confirm-result-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @media (max-width: 800px) {
@@ -466,5 +479,11 @@
   .confirmation-result__primary {
     width: 100%;
     min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirmation-result {
+    animation: none;
   }
 }

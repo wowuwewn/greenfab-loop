@@ -6,6 +6,7 @@ import {
   FileText,
   Pencil,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react'
 import { WorkflowStepper } from '../components/WorkflowStepper'
 import { ApiErrorMessage } from '../components/ApiErrorMessage'
@@ -46,6 +47,15 @@ interface PassportFormErrors {
   description?: string
   quantity?: string
   unit?: string
+}
+
+const GOLDEN_DEMO_FORM_VALUES: PassportFormValues = {
+  description: '반도체 세정 공정에서 회수된 DEMO 미세 무기질 분말',
+  quantity: '12',
+  unit: 'kg',
+  condition: '건조 분말',
+  location: '제조동 A',
+  composition: '이산화규소 중심 합성 DEMO 성분표',
 }
 
 const toFormValues = (
@@ -174,6 +184,13 @@ export function PassportPage({
     }
   }
 
+  const loadGoldenDemoExample = () => {
+    setFormValues(GOLDEN_DEMO_FORM_VALUES)
+    setErrors({})
+    setApiError(null)
+    setUnmappedFieldErrors([])
+  }
+
   const startEditing = () => {
     setFormValues(toFormValues(resourcePassport))
     setErrors({})
@@ -215,9 +232,6 @@ export function PassportPage({
             <p>
               다음 활용 후보를 찾기 위해 현장에서 확인한 자원의 정보를 입력합니다.
             </p>
-            <small>
-              SECOM에는 자원 상세 정보가 없어 이번 MVP에서는 DEMO 입력으로 구분합니다.
-            </small>
           </div>
         </section>
 
@@ -272,7 +286,7 @@ export function PassportPage({
                 <span className="source-badge source-badge--demo">DEMO</span>
                 <div>
                   <strong>자원 상세 정보</strong>
-                  <small>SECOM에 없는 현장 Resource 정보를 이번 MVP에서 데모 입력</small>
+                  <small>확인한 자원 정보를 항목별로 정리합니다</small>
                 </div>
               </div>
             </div>
@@ -287,6 +301,24 @@ export function PassportPage({
                     />
                   </div>
                 )}
+                <div className="passport-demo-example passport-field--full">
+                  <div>
+                    <span className="source-badge source-badge--demo">DEMO</span>
+                    <p>
+                      <strong>시연용 입력 예시</strong>
+                      <small>예시를 불러온 뒤 내용을 확인하고 저장해주세요.</small>
+                    </p>
+                  </div>
+                  <button
+                    className="secondary-button passport-demo-example__button"
+                    type="button"
+                    onClick={loadGoldenDemoExample}
+                    disabled={isSaving}
+                  >
+                    <Sparkles size={15} strokeWidth={1.8} aria-hidden="true" />
+                    시연 예시 불러오기
+                  </button>
+                </div>
                 <label className="passport-field passport-field--full">
                   <span>자원 설명 <em className="is-required">필수</em></span>
                   <textarea
@@ -324,14 +356,18 @@ export function PassportPage({
 
                 <label className="passport-field">
                   <span>단위 <em>선택사항</em></span>
-                  <input
-                    type="text"
-                    placeholder="예: kg"
+                  <select
                     value={formValues.unit}
                     onChange={(event) => updateField('unit', event.target.value)}
                     aria-invalid={Boolean(errors.unit)}
                     aria-describedby="unit-error"
-                  />
+                  >
+                    <option value="">단위 선택</option>
+                    <option value="kg">kg</option>
+                    <option value="g">g</option>
+                    <option value="t">t</option>
+                    <option value="L">L</option>
+                  </select>
                   {errors.unit && (
                     <strong className="passport-field__error" id="unit-error">
                       {errors.unit}

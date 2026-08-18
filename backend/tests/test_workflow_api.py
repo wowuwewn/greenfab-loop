@@ -150,6 +150,104 @@ def test_golden_case_completes_full_workflow(client, session_factory) -> None:
         assert session.scalar(select(func.count(AuditEvent.audit_event_id))) == 7
 
 
+def test_frontend_esg_contract_persists_and_receipt_restores(client) -> None:
+    _confirm_and_save_passport(client)
+    match = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/matches",
+        json={"top_k": 3},
+    )
+    assert match.status_code == 200
+    decision = client.put(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/decision",
+        json={
+            "status": "APPROVED",
+            "selected_demand_id": "D01",
+            "reason": "성분 분석 완료 후 소량 파일럿 검토를 진행합니다.",
+        },
+    )
+    assert decision.status_code == 200
+
+    invalid = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/esg-scenario",
+        json={
+            "scenario_quantity_kg": 12,
+            "baseline_pathway": "기존 폐기 처리",
+            "alternative_pathway": "세라믹 원료 파일럿 활용",
+            "baseline_energy_factor_kwh_per_kg": 2,
+        },
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    payload = {
+        "scenario_quantity_kg": 12,
+        "baseline_pathway": "기존 폐기 처리",
+        "alternative_pathway": "세라믹 원료 파일럿 활용",
+        "baseline_energy_factor_kwh_per_kg": 2,
+        "alternative_energy_factor_kwh_per_kg": 1.5,
+        "baseline_carbon_factor_kgco2e_per_kg": 0.8,
+        "alternative_carbon_factor_kgco2e_per_kg": 0.25,
+        "factor_source": "합성 DEMO 계수 · 기능 검증 전용",
+    }
+    scenario = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/esg-scenario",
+        json=payload,
+    )
+    assert scenario.status_code == 200, scenario.text
+    stored = scenario.json()["esg_scenario"]
+    assert stored["source_type"] == "SCENARIO"
+    assert stored["formula_version"] == "ESG-SCENARIO-v0.1"
+    assert stored["inputs"] == {
+        key: value for key, value in payload.items() if key != "factor_source"
+    }
+    assert stored["results"]["diverted_quantity_kg"] == 12
+    assert stored["results"]["energy_difference_kwh"] == 6
+    assert abs(stored["results"]["carbon_difference_kgco2e"] - 6.6) < 1e-9
+    assert stored["factor_source"] == payload["factor_source"]
+
+    updated_payload = {
+        **payload,
+        "scenario_quantity_kg": 10,
+        "baseline_energy_factor_kwh_per_kg": None,
+        "alternative_energy_factor_kwh_per_kg": None,
+        "baseline_carbon_factor_kgco2e_per_kg": None,
+        "alternative_carbon_factor_kgco2e_per_kg": None,
+        "factor_source": None,
+    }
+    updated = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/esg-scenario",
+        json=updated_payload,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["esg_scenario"]["results"] == {
+        "diverted_quantity_kg": 10,
+        "energy_difference_kwh": None,
+        "carbon_difference_kgco2e": None,
+    }
+
+    receipt = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/receipt",
+        headers={"Idempotency-Key": "frontend-receipt-contract-v1"},
+    )
+    assert receipt.status_code == 200
+    receipt_id = receipt.json()["receipt"]["receipt_id"]
+    restored_case = client.get(f"/api/v1/cases/{GOLDEN_CASE_ID}")
+    restored_receipt = client.get(f"/api/v1/cases/{GOLDEN_CASE_ID}/receipt")
+    verified_receipt = client.get(f"/api/v1/receipts/{receipt_id}")
+    assert restored_case.status_code == restored_receipt.status_code == 200
+    assert verified_receipt.status_code == 200
+    assert restored_case.json()["esg_scenario"] == restored_receipt.json()["esg_scenario"]
+    assert verified_receipt.json() == restored_receipt.json()
+    assert restored_receipt.json()["receipt"]["receipt_id"] == receipt_id
+
+    immutable = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/esg-scenario",
+        json=payload,
+    )
+    assert immutable.status_code == 409
+    assert immutable.json()["error"]["code"] == "INVALID_STATE"
+
+
 def test_not_confirmed_closes_case_and_blocks_passport(client) -> None:
     confirmation = client.put(
         f"/api/v1/cases/{GOLDEN_CASE_ID}/resource-confirmation",

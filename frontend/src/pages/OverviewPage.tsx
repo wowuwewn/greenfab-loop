@@ -84,6 +84,15 @@ export function OverviewPage({ onStartDemo }: OverviewPageProps) {
         </section>
 
         <div className="overview-details page-container">
+          <aside className="overview-scope-note" aria-label="제조업 확장 방향">
+            <strong>이번 MVP</strong>
+            <p>반도체 제조의 UCI SECOM을 첫 실제 데이터 적용 사례로 사용합니다.</p>
+            <span>
+              GreenFab Loop의 핵심은 위험 선별 → 현장 확인 → 자원 정보 → 후보 탐색 →
+              조건 확인 → 사람 결정의 공통 의사결정 구조입니다. 다른 제조업에 적용할
+              때에는 해당 산업 데이터와 임계값을 별도로 학습·검증해야 합니다.
+            </span>
+          </aside>
           <DataLegend />
         </div>
       </main>

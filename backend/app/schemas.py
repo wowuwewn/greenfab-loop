@@ -139,6 +139,29 @@ class DecisionOut(ContractModel):
     decided_at: datetime
 
 
+class ESGScenarioRequest(ContractModel):
+    scenario_quantity_kg: float = Field(gt=0)
+    baseline_pathway: str = Field(min_length=1, max_length=1000)
+    alternative_pathway: str = Field(min_length=1, max_length=2000)
+    baseline_energy_factor_kwh_per_kg: float | None = Field(default=None, ge=0)
+    alternative_energy_factor_kwh_per_kg: float | None = Field(default=None, ge=0)
+    baseline_carbon_factor_kgco2e_per_kg: float | None = Field(default=None, ge=0)
+    alternative_carbon_factor_kgco2e_per_kg: float | None = Field(default=None, ge=0)
+    factor_source: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_source_for_factors(self) -> ESGScenarioRequest:
+        factors = (
+            self.baseline_energy_factor_kwh_per_kg,
+            self.alternative_energy_factor_kwh_per_kg,
+            self.baseline_carbon_factor_kgco2e_per_kg,
+            self.alternative_carbon_factor_kgco2e_per_kg,
+        )
+        if any(value is not None for value in factors) and not self.factor_source:
+            raise ValueError("factor_source is required when an ESG factor is provided")
+        return self
+
+
 class ESGScenarioOut(ContractModel):
     source_type: SourceType
     inputs: dict[str, Any]

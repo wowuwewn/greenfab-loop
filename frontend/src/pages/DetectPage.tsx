@@ -50,8 +50,12 @@ export function DetectPage({
         <section className="hero-copy" aria-labelledby="page-title">
           <div className="hero-copy__main">
             <span className="eyebrow">01 · 위험 선별</span>
-            <h1 id="page-title">먼저 볼 생산 건을 선별합니다</h1>
-            <p>SECOM 분석 결과를 바탕으로 우선 확인할 생산 건을 보여줍니다.</p>
+            <h1 id="page-title">먼저 불량 위험이 높은 생산 건을 선별합니다</h1>
+            <p>
+              모델은 최종 불량을 확정하거나 제품을 자동 폐기하지 않습니다.
+              공정 측정값을 바탕으로 최종 품질 판정 전에 확인이 필요한 생산 건의
+              우선순위를 정합니다.
+            </p>
             <div className="provenance" aria-label="데이터 출처">
               <span className="provenance__badge">REAL</span>
               <span className="provenance__text">UCI SECOM + 모델 결과</span>

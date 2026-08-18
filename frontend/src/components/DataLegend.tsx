@@ -5,7 +5,7 @@ const legendItems = [
   },
   {
     type: 'DEMO',
-    description: 'SECOM에 없는 자원·수요처 등 MVP 합성 데이터',
+    description: '시연을 위해 구성한 자원·수요처 데이터',
   },
   {
     type: 'SCENARIO',

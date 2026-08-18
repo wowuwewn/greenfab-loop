@@ -25,6 +25,7 @@ from app.schemas import (
     DemandOut,
     DemandUpdate,
     ErrorResponse,
+    ESGScenarioRequest,
     HealthOut,
     MatchRequest,
     PassportEvidenceOut,
@@ -70,6 +71,7 @@ from app.services.workflow import (
     fail_match,
     get_case,
     get_case_envelope,
+    get_receipt_envelope,
     list_case_summaries,
     prepare_match,
     save_decision,
@@ -540,11 +542,13 @@ def generate_esg_scenario(
     request: Request,
     db: DbSession,
     principal: OperatorPrincipal,
+    payload: ESGScenarioRequest | None = None,
 ) -> CaseEnvelope:
     with db.begin():
         record = create_esg_scenario(
             db,
             case_id,
+            payload,
             actor=principal.actor,
             trace_id=_trace_id(request),
         )
@@ -578,6 +582,11 @@ def read_receipt(case_id: str, db: DbSession, _principal: ViewerPrincipal) -> Ca
     if record.receipt is None:
         raise DomainError("RECEIPT_NOT_FOUND", "아직 생성된 Receipt가 없습니다.", 404)
     return CaseEnvelope.model_validate(record.receipt.payload_json)
+
+
+@api_router.get("/receipts/{receipt_id}", response_model=CaseEnvelope)
+def verify_receipt(receipt_id: str, db: DbSession, _principal: ViewerPrincipal) -> CaseEnvelope:
+    return get_receipt_envelope(db, receipt_id)
 
 
 @api_router.post("/demo/reset", response_model=CaseEnvelope)

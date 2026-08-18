@@ -158,7 +158,7 @@ export function ConfirmPage({
             </div>
             <div className="source-transition__content">
               <p>실제 자원 발생 여부</p>
-              <small>SECOM에 없는 정보를 이번 MVP에서 데모 입력</small>
+              <small>현장 담당자가 확인 결과를 입력합니다</small>
             </div>
           </div>
         </section>

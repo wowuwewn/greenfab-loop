@@ -45,13 +45,13 @@ interface DecisionErrors {
 const candidateStatusLabels: Record<MatchCandidate['status'], string> = {
   REVIEW: '검토 가능',
   NEEDS_INFO: '추가 정보 필요',
-  RULE_FAIL: '규칙 불충족',
+  RULE_FAIL: '조건 불충족',
 }
 
 const decisionLabels: Record<DecisionStatus, string> = {
-  APPROVED: '승인',
-  HOLD: '보류',
-  REJECTED: '거절',
+  APPROVED: '파일럿 검토 승인',
+  HOLD: '추가 확인 후 보류',
+  REJECTED: '후보 제외',
 }
 
 const fieldLabels: Record<string, string> = {
@@ -67,10 +67,12 @@ const ruleLabels = [
   ['location', '위치 조건'],
 ] as const
 
-const ruleValueLabel = (value: boolean | null) => {
-  if (value === true) return '조건 충족'
-  if (value === false) return '조건 불충족'
-  return '미평가'
+const ruleValueLabel = (key: (typeof ruleLabels)[number][0], value: boolean | null) => {
+  if (value === true) return '✓ 조건 충족'
+  if (value === false) {
+    return key === 'required_info' ? '! 추가 확인' : '× 조건 불충족'
+  }
+  return '— 미평가'
 }
 
 const ruleValueClass = (value: boolean | null) => {
@@ -263,12 +265,19 @@ export function ReviewPage({
               </span>
             </div>
 
+            {hasCandidates && (
+              <p className="review-selection-guide">
+                <CheckCircle2 size={15} strokeWidth={1.9} aria-hidden="true" />
+                검토 가능한 후보를 선택한 뒤 최종 결정을 내려주세요.
+              </p>
+            )}
+
             {!hasCandidates ? (
               <div className="candidate-empty">
                 <span aria-hidden="true"><Search size={25} strokeWidth={1.7} /></span>
                 <h3>후보 탐색 결과를 기다리고 있습니다</h3>
                 <p>
-                  BGE-M3 후보 탐색 결과가 연결되면 여기에서 후보와 규칙 확인 결과를 검토할 수 있습니다.
+                  후보 탐색 결과가 연결되면 여기에서 후보와 규칙 확인 결과를 검토할 수 있습니다.
                 </p>
               </div>
             ) : (
@@ -287,9 +296,17 @@ export function ReviewPage({
                     >
                       <div className="candidate-row__topline">
                         <span>{index + 1}순위</span>
-                        <span className={`candidate-status candidate-status--${candidate.status.toLowerCase()}`}>
-                          {candidateStatusLabels[candidate.status]}
-                        </span>
+                        <div className="candidate-row__badges">
+                          {isSelected && (
+                            <span className="candidate-selected-label">
+                              <CheckCircle2 size={12} strokeWidth={2} aria-hidden="true" />
+                              선택됨
+                            </span>
+                          )}
+                          <span className={`candidate-status candidate-status--${candidate.status.toLowerCase()}`}>
+                            {candidateStatusLabels[candidate.status]}
+                          </span>
+                        </div>
                       </div>
                       <div className="candidate-row__identity">
                         <div>
@@ -309,7 +326,15 @@ export function ReviewPage({
                           return (
                             <div key={key}>
                               <dt>{label}</dt>
-                              <dd className={ruleValueClass(value)}>{ruleValueLabel(value)}</dd>
+                              <dd
+                                className={`${ruleValueClass(value)}${
+                                  key === 'required_info' && value === false
+                                    ? ' is-needs-info'
+                                    : ''
+                                }`}
+                              >
+                                {ruleValueLabel(key, value)}
+                              </dd>
                             </div>
                           )
                         })}
@@ -328,6 +353,9 @@ export function ReviewPage({
                     </button>
                   )
                 })}
+                <p className="review-rule-help">
+                  미평가: 해당 후보에 적용할 조건이 없거나 현재 정보로 평가하지 않은 항목
+                </p>
                 <p className="similarity-note">
                   의미 유사도는 문장 의미가 얼마나 가까운지를 나타내며, 산업 적합도나 성공 확률을 의미하지 않습니다.
                 </p>
@@ -407,10 +435,11 @@ export function ReviewPage({
                 </div>
 
                 <label className="decision-reason-field">
-                  <span>결정 사유 <em>필수</em></span>
+                  <span>결정 사유 <em>필수 · 10자 이상</em></span>
                   <textarea
                     rows={4}
-                    placeholder="승인·보류·거절 사유를 간단히 입력해주세요."
+                    maxLength={2000}
+                    placeholder="예: 성분 분석 완료 후 소량 파일럿 검토를 진행합니다."
                     value={reason}
                     onChange={(event) => {
                       setReason(event.target.value)
@@ -418,9 +447,15 @@ export function ReviewPage({
                     }}
                     disabled={!hasCandidates || isSaving}
                     aria-invalid={Boolean(errors.reason)}
+                    aria-describedby="decision-reason-count decision-reason-error"
                   />
+                  <small className="decision-reason-count" id="decision-reason-count">
+                    {reason.trim().length} / 최소 10자
+                  </small>
                   {errors.reason && (
-                    <strong className="review-field-error">{errors.reason}</strong>
+                    <strong className="review-field-error" id="decision-reason-error">
+                      {errors.reason}
+                    </strong>
                   )}
                 </label>
 
@@ -444,15 +479,14 @@ export function ReviewPage({
                       <div className="review-dev-preview">
                         <button
                           className="secondary-button"
-                          type="button"
-                          onClick={onGoToReceipt}
-                        >
-                          결과 기록 화면 미리보기
-                        </button>
-                        <p>
-                          개발용 미리보기 · 실제 서비스 흐름에서는 최종 결정 후
-                          이동합니다.
-                        </p>
+                            type="button"
+                            onClick={onGoToReceipt}
+                          >
+                            결과 기록 화면 확인
+                          </button>
+                          <p>
+                            후보 탐색 결과가 연결되면 최종 결정 후 이동합니다.
+                          </p>
                       </div>
                     )}
                   </>

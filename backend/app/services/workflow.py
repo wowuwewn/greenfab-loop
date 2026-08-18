@@ -43,6 +43,7 @@ from app.schemas import (
     DecisionOut,
     DecisionRequest,
     ESGScenarioOut,
+    ESGScenarioRequest,
     MatchCandidateOut,
     MatchOut,
     ReceiptOut,
@@ -143,6 +144,17 @@ def get_case_for_update(session: Session, case_id: str) -> Case:
 def get_case_envelope(session: Session, case_id: str) -> CaseEnvelope:
     record = get_case(session, case_id)
     return build_case_envelope(session, record)
+
+
+def get_receipt_envelope(session: Session, receipt_id: str) -> CaseEnvelope:
+    receipt = session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise DomainError(
+            code="RECEIPT_NOT_FOUND",
+            message="저장된 Receipt를 찾을 수 없습니다.",
+            status_code=404,
+        )
+    return CaseEnvelope.model_validate(receipt.payload_json)
 
 
 def build_case_envelope(session: Session, record: Case) -> CaseEnvelope:
@@ -865,6 +877,7 @@ def save_decision(
 def create_esg_scenario(
     session: Session,
     case_id: str,
+    payload: ESGScenarioRequest | None = None,
     *,
     actor: str = "demo_operator",
     trace_id: str | None = None,
@@ -875,38 +888,97 @@ def create_esg_scenario(
         {WorkflowStatus.DECIDED, WorkflowStatus.SCENARIO_READY},
         "Decision 기록 후에만 ESG Scenario를 생성할 수 있습니다.",
     )
-    if record.esg_scenario is not None:
-        return record
     if record.decision is None or record.resource_passport is None:
         raise DomainError("INVALID_STATE", "Decision 또는 Passport가 없습니다.", 409)
 
-    before = record.workflow_status
-    quantity = _number(record.resource_passport.quantity)
-    diversion = quantity if record.decision.status is DecisionStatus.APPROVED else 0
-    scenario = ESGScenario(
-        case_id=case_id,
-        decision_id=record.decision.decision_id,
-        source_type=SourceType.SCENARIO,
-        inputs={
+    if payload is None:
+        if record.esg_scenario is not None:
+            return record
+        quantity = _number(record.resource_passport.quantity)
+        diversion = quantity if record.decision.status is DecisionStatus.APPROVED else 0
+        inputs = {
             "resource_quantity": quantity,
             "unit": record.resource_passport.unit,
             "decision_status": record.decision.status.value,
-        },
-        results={
+        }
+        results = {
             # Unknown input stays unknown. Zero is reserved for a deliberate
             # HOLD/REJECTED decision, not for an absent quantity measurement.
             "candidate_diversion_quantity": diversion,
             "unit": record.resource_passport.unit,
-        },
-        formula_version="candidate_diversion_v0.1",
-        factor_source=None,
-    )
-    record.esg_scenario = scenario
+        }
+        formula_version = "candidate_diversion_v0.1"
+        factor_source = None
+    else:
+        quantity = payload.scenario_quantity_kg
+        inputs = {
+            "scenario_quantity_kg": quantity,
+            "baseline_pathway": payload.baseline_pathway,
+            "alternative_pathway": payload.alternative_pathway,
+            "baseline_energy_factor_kwh_per_kg": (payload.baseline_energy_factor_kwh_per_kg),
+            "alternative_energy_factor_kwh_per_kg": (payload.alternative_energy_factor_kwh_per_kg),
+            "baseline_carbon_factor_kgco2e_per_kg": (payload.baseline_carbon_factor_kgco2e_per_kg),
+            "alternative_carbon_factor_kgco2e_per_kg": (
+                payload.alternative_carbon_factor_kgco2e_per_kg
+            ),
+        }
+        energy_difference = (
+            quantity
+            * (
+                payload.baseline_energy_factor_kwh_per_kg
+                - payload.alternative_energy_factor_kwh_per_kg
+            )
+            if payload.baseline_energy_factor_kwh_per_kg is not None
+            and payload.alternative_energy_factor_kwh_per_kg is not None
+            else None
+        )
+        carbon_difference = (
+            quantity
+            * (
+                payload.baseline_carbon_factor_kgco2e_per_kg
+                - payload.alternative_carbon_factor_kgco2e_per_kg
+            )
+            if payload.baseline_carbon_factor_kgco2e_per_kg is not None
+            and payload.alternative_carbon_factor_kgco2e_per_kg is not None
+            else None
+        )
+        results = {
+            "diverted_quantity_kg": quantity,
+            "energy_difference_kwh": energy_difference,
+            "carbon_difference_kgco2e": carbon_difference,
+        }
+        formula_version = "ESG-SCENARIO-v0.1"
+        factor_source = payload.factor_source
+
+    before = record.workflow_status
+    scenario = record.esg_scenario
+    if scenario is not None:
+        if (
+            scenario.inputs == inputs
+            and scenario.results == results
+            and scenario.formula_version == formula_version
+            and scenario.factor_source == factor_source
+        ):
+            return record
+        event_type = "ESG_SCENARIO_UPDATED"
+    else:
+        scenario = ESGScenario(
+            case_id=case_id,
+            decision_id=record.decision.decision_id,
+            source_type=SourceType.SCENARIO,
+        )
+        record.esg_scenario = scenario
+        event_type = "ESG_SCENARIO_CREATED"
+
+    scenario.inputs = inputs
+    scenario.results = results
+    scenario.formula_version = formula_version
+    scenario.factor_source = factor_source
     record.workflow_status = WorkflowStatus.SCENARIO_READY
     _audit(
         session,
         record,
-        event_type="ESG_SCENARIO_CREATED",
+        event_type=event_type,
         actor=actor,
         before=before,
         payload={"formula_version": scenario.formula_version},
