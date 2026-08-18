@@ -115,24 +115,20 @@ required_info == false 또는 missing_fields가 비어 있지 않음
 
 ### ESG Scenario
 
-MVP는 후보 전환량만 계산합니다.
+Golden Frontend는 사용자 입력을 다음 수식으로 계산하고 Backend가 같은 값을 다시 계산해 저장합니다.
 
 ```text
-APPROVED && quantity known
-candidate_diversion_quantity = resource_passport.quantity
-
-APPROVED && quantity unknown
-candidate_diversion_quantity = null
-
-HOLD or REJECTED
-candidate_diversion_quantity = 0
+diverted_quantity_kg = scenario_quantity_kg
+energy_difference_kwh = quantity * (baseline_energy_factor - alternative_energy_factor)
+carbon_difference_kgco2e = quantity * (baseline_carbon_factor - alternative_carbon_factor)
 ```
 
-- `source_type`은 `SCENARIO`입니다.
-- `formula_version`은 `candidate_diversion_v0.1`입니다.
-- 환산계수를 사용하지 않으므로 `factor_source`는 `null`입니다.
-- 승인됐지만 수량이 `null`이면 후보 전환량도 `null`로 유지합니다. unknown을 0으로 바꾸지 않습니다.
+- `source_type`은 `SCENARIO`, `formula_version`은 `ESG-SCENARIO-v0.1`입니다.
+- 에너지·탄소의 기준/대안 계수가 모두 있어야 해당 차이를 계산하며, 아니면 `null`입니다.
+- 계수를 하나라도 입력하면 `factor_source`가 필요합니다.
 - Scenario는 `decision_id` FK로 계산에 사용한 정확한 Decision을 연결합니다.
+- Receipt 생성 전에는 재계산할 수 있고 Receipt 생성 후에는 snapshot 보호를 위해 수정하지 않습니다.
+- body 없는 기존 Backend 호출은 호환용 `candidate_diversion_v0.1` 결과를 유지합니다.
 - 결과를 실제 회수·재활용·탄소 감축량이라고 표현하지 않습니다.
 
 ### Green Receipt
@@ -150,7 +146,7 @@ candidate_diversion_quantity = 0
 - Match와 Receipt는 선택적 `Idempotency-Key`를 지원하고 Client가 항상 전송하는 것을 권장합니다.
 - `Idempotency-Key`는 공백 이외 문자를 포함한 1–255자여야 합니다.
 - 같은 Case의 Match에서 같은 키를 재사용하면 기존 실행을 반환합니다. key 범위는 Case이므로 다른 Case에서는 같은 문자열을 사용할 수 있습니다.
-- Scenario는 Case당 하나이며 `SCENARIO_READY`에서 재호출하면 기존 결과를 반환합니다.
+- Scenario는 Case당 하나이며 Receipt 생성 전에는 같은 row를 재계산하고, Receipt 생성 후에는 수정 요청을 거부합니다.
 - Receipt도 Case당 하나이고 key 범위는 Case입니다. 같은 키 또는 키 없는 재호출은 기존 Receipt를 반환합니다. 기존 Receipt가 key와 함께 생성됐는데 같은 Case에서 다른 non-null key를 사용하면 `409 RECEIPT_ALREADY_EXISTS`입니다.
 - row lock과 DB Unique 제약이 같은 Case의 동시 재시도에서 중복 Match/Receipt 생성을 막습니다.
 

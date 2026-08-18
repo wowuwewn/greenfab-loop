@@ -11,7 +11,7 @@
 - Resource 발생 여부와 Passport는 사람이 확인·입력합니다.
 - BGE-M3 점수는 문장 의미 유사도이며 적합도·안전성·성공확률이 아닙니다.
 - Rule은 코드로 명시된 조건만 검사하고 최종 결정은 사람이 합니다.
-- ESG는 후보 전환량 Scenario이며 실제 감축 실적이 아닙니다.
+- ESG는 사용자 입력값 기반 Scenario이며 실제 감축 실적이 아닙니다.
 - Green Receipt는 내부 의사결정 기록이며 법적 인증서나 실제 인계 증명이 아닙니다.
 
 ## 2. 시연 전 준비
@@ -52,7 +52,7 @@
 | 1:20–1:50 | Match 실행 후 Top-3 확인 | BGE-M3는 의미가 가까운 DEMO 수요를 찾는다. 점수는 의미 유사도다. | `MATCH_READY` |
 | 1:50–2:10 | Rule 결과 비교 | `false`는 명시 조건 위반, 누락 필수정보는 추가 확인 대상이다. `null`은 미평가/비적용일 수 있다. | `MATCH_READY` |
 | 2:10–2:30 | 사람이 후보 선택·승인 | AI가 아니라 담당자가 후보와 근거를 보고 최종 결정한다. | `DECIDED` |
-| 2:30–2:45 | ESG Scenario 생성 | 12 kg은 승인된 Passport 수량 기반 후보 전환량일 뿐 실제 전환 또는 탄소 감축량이 아니다. | `SCENARIO_READY` |
+| 2:30–2:45 | ESG Scenario 저장 | 사용자 입력 수량·경로와 선택 계수를 Backend가 다시 계산해 저장하며 실제 전환 또는 탄소 감축 실적이 아니다. | `SCENARIO_READY` |
 | 2:45–3:00 | Green Receipt 생성·열기 | 결정 당시 입력과 근거를 남긴 내부 JSON 기록이다. 아직 물리적 인계 완료가 아니다. | `RECEIPT_CREATED` |
 
 ## 4. 단계별 기대 데이터
@@ -89,23 +89,20 @@
 
 ### ESG Scenario
 
-정상 승인 흐름의 최소 수식은 다음과 같습니다.
+사용자가 비교 수량, 현재 처리 방식, 대안 활용 방식과 선택 계수를 입력합니다.
+Backend는 `ESG-SCENARIO-v0.1` 계산식을 다시 적용해 같은 의미로 저장합니다.
 
 ```text
-APPROVED && passport.quantity is known
-candidate_diversion_quantity = passport.quantity
-
-APPROVED && passport.quantity is unknown
-candidate_diversion_quantity = null
-
-HOLD or REJECTED
-candidate_diversion_quantity = 0
+diverted_quantity_kg = scenario_quantity_kg
+energy_difference_kwh = quantity * (baseline_energy_factor - alternative_energy_factor)
+carbon_difference_kgco2e = quantity * (baseline_carbon_factor - alternative_carbon_factor)
 ```
 
 - `source_type`은 반드시 `SCENARIO`입니다.
-- `formula_version`은 `candidate_diversion_v0.1`입니다.
-- 환산계수를 사용하지 않으므로 `factor_source`는 `null`입니다.
-- CO2e, 탄소 감축률, 비용 절감액을 임의 계산하지 않습니다.
+- 각 차이는 기준·대안 계수를 모두 입력한 경우에만 계산하고, 아니면 `null`입니다.
+- 계수를 하나라도 사용하면 `factor_source`를 함께 기록합니다.
+- CO2e, 탄소 감축률, 비용 절감액을 임의 생성하지 않으며 결과는 실제 실적이 아닙니다.
+- body 없는 기존 API 호출은 호환용 `candidate_diversion_v0.1`을 유지하지만 Golden Frontend는 사용자 입력 계약을 사용합니다.
 
 ### Green Receipt
 

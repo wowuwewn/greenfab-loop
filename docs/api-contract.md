@@ -359,32 +359,52 @@ Errors: `409 INVALID_STATE`, `409 INVALID_CANDIDATE`, `409 CANDIDATE_NOT_REVIEWA
 ### `POST /api/v1/cases/{case_id}/esg-scenario`
 
 Headers: Production `X-API-Key`, 명시적 Demo에서만 `X-Actor` 선택
-Request body: 없음
+Request body: Frontend 사용자 입력 Scenario. 기존 Backend 호출 호환을 위해 body 생략도 허용합니다.
+
+```json
+{
+  "scenario_quantity_kg": 12,
+  "baseline_pathway": "기존 폐기 처리",
+  "alternative_pathway": "세라믹 원료 파일럿 활용",
+  "baseline_energy_factor_kwh_per_kg": null,
+  "alternative_energy_factor_kwh_per_kg": null,
+  "baseline_carbon_factor_kgco2e_per_kg": null,
+  "alternative_carbon_factor_kgco2e_per_kg": null,
+  "factor_source": null
+}
+```
+
+Body가 있으면 Backend가 같은 입력으로 `ESG-SCENARIO-v0.1` 결과를 재계산해 저장합니다.
 
 ```json
 {
   "source_type": "SCENARIO",
   "inputs": {
-    "resource_quantity": 12,
-    "unit": "kg",
-    "decision_status": "APPROVED"
+    "scenario_quantity_kg": 12,
+    "baseline_pathway": "기존 폐기 처리",
+    "alternative_pathway": "세라믹 원료 파일럿 활용",
+    "baseline_energy_factor_kwh_per_kg": null,
+    "alternative_energy_factor_kwh_per_kg": null,
+    "baseline_carbon_factor_kgco2e_per_kg": null,
+    "alternative_carbon_factor_kgco2e_per_kg": null
   },
   "results": {
-    "candidate_diversion_quantity": 12,
-    "unit": "kg"
+    "diverted_quantity_kg": 12,
+    "energy_difference_kwh": null,
+    "carbon_difference_kgco2e": null
   },
-  "formula_version": "candidate_diversion_v0.1",
+  "formula_version": "ESG-SCENARIO-v0.1",
   "factor_source": null
 }
 ```
 
 - `DECIDED`, `SCENARIO_READY`에서 허용합니다.
-- Case당 하나이며 재호출하면 기존 Scenario를 반환합니다.
+- Body가 있으면 수량·경로·선택 계수를 검증하고 결과를 Backend에서 재계산합니다. 계수를 하나라도 입력하면 `factor_source`가 필요합니다.
+- 에너지 또는 탄소의 기준·대안 계수 중 하나라도 없으면 해당 차이는 `null`입니다.
+- Receipt 생성 전에는 Scenario를 다시 계산해 같은 row를 갱신할 수 있고, Receipt 생성 후에는 저장 snapshot 보호를 위해 `409`로 막습니다.
+- Body를 생략한 기존 Backend 호출은 `candidate_diversion_v0.1` 계약을 유지합니다. 이 호환 경로에서만 APPROVED 수량 또는 HOLD/REJECTED 0을 기록합니다.
 - 내부 `decision_id` FK로 Scenario 계산에 사용한 정확한 Decision을 연결합니다.
-- `APPROVED`이고 수량을 알면 후보 전환량은 Passport 수량입니다.
-- `APPROVED`이고 수량을 모르면 `candidate_diversion_quantity`는 `null`입니다.
-- `HOLD`, `REJECTED`이면 후보 전환량은 0입니다.
-- 실제 전환, CO2e, 비용 절감 값을 만들지 않습니다.
+- 모든 결과는 사용자 입력 기반 가정이며 실제 전환, CO2e 또는 비용 절감 실적이 아닙니다.
 
 Response `200`: 최신 Case envelope
 Errors: `409 INVALID_STATE`
@@ -426,6 +446,14 @@ Errors: `409 INVALID_STATE`, `409 RECEIPT_ALREADY_EXISTS`
 ```
 
 Errors: `404 CASE_NOT_FOUND`, `404 RECEIPT_NOT_FOUND`
+
+### `GET /api/v1/receipts/{receipt_id}`
+
+저장된 `receipt_id`로 같은 Receipt 생성 시점의 `CaseEnvelope` snapshot을 조회합니다.
+Frontend의 `#/verify/{receipt_id}` read-only 화면이 이 API를 사용하며, 원 Case의 현재 상태를
+다시 조립하지 않습니다.
+
+Errors: `404 RECEIPT_NOT_FOUND`
 
 Receipt는 법적 인증서, 실제 물류 인계 확인 또는 불변 감사 원장이 아닙니다.
 

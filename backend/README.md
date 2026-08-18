@@ -70,6 +70,21 @@ alembic upgrade head
 alembic current
 ```
 
+실제 BGE-M3 환경에서는 별도의 isolated DB/Chroma 경로와 `DEMO_RESET_ENABLED=true`를
+사용해 Golden runtime을 확인합니다. `verify_bge_golden.py`는 reset을 포함하므로 공유 DB에
+실행하지 않습니다.
+
+```bash
+python scripts/verify_bge_golden.py
+python scripts/evaluate_semantic_search.py \
+  ../docs/evaluation/semantic_search_queries.json --compact
+```
+
+기록된 결과와 정직한 한계는
+[`docs/evaluation/semantic_search_eval.md`](../docs/evaluation/semantic_search_eval.md)와
+[`bge_golden_runtime.json`](../docs/evaluation/bge_golden_runtime.json)에 있습니다. 질의 6개와
+DEMO 후보 3개를 사용한 기능 검증으로 산업 일반 성능을 의미하지 않습니다.
+
 GitHub의 `Backend CI` workflow는 Python 3.12와 PostgreSQL 16에서 다음 품질
 게이트를 자동 실행합니다.
 
@@ -264,11 +279,16 @@ curl -X PUT http://localhost:8000/api/v1/cases/SECOM-0116/decision \
 `APPROVED`는 최신 Match의 `REVIEW` 후보만 허용합니다. 현재 MVP에는 Rule override가 없습니다.
 Backend는 외부 `selected_demand_id`와 함께 내부 `selected_match_candidate_id` FK를 저장해 실제 검토 후보를 추적합니다.
 
-### 6) 후보 전환량 Scenario 생성
+### 6) 사용자 입력 ESG Scenario 저장
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/cases/SECOM-0116/esg-scenario
+curl -X POST http://localhost:8000/api/v1/cases/SECOM-0116/esg-scenario \
+  -H 'Content-Type: application/json' \
+  -d '{"scenario_quantity_kg":12,"baseline_pathway":"기존 폐기 처리","alternative_pathway":"세라믹 원료 파일럿 활용","baseline_energy_factor_kwh_per_kg":null,"alternative_energy_factor_kwh_per_kg":null,"baseline_carbon_factor_kgco2e_per_kg":null,"alternative_carbon_factor_kgco2e_per_kg":null,"factor_source":null}'
 ```
+
+Backend는 사용자 입력을 다시 계산해 `ESG-SCENARIO-v0.1`으로 저장합니다. 이 결과는
+가정 Scenario이며 실제 감축 실적이나 AI 예측이 아닙니다.
 
 ### 7) Green Receipt 생성·조회
 
@@ -359,8 +379,8 @@ index event를 불필요하게 늘리지 않습니다.
 - Resource 확인, Passport, Demand, Match와 사용자 정보는 해커톤 `DEMO` 데이터입니다.
 - SHAP은 예측 기여도이며 원인·인과관계가 아닙니다.
 - semantic similarity는 의미 유사도이며 적합도·안전성·성공확률이 아닙니다.
-- ESG는 `candidate_diversion_quantity`만 계산하는 `SCENARIO`입니다. 탄소 감축량이나 실제 전환 실적이 아닙니다.
-- 승인 수량을 모르면 후보 전환량도 `null`이며 unknown을 0으로 바꾸지 않습니다.
+- ESG는 사용자 입력 수량·경로·선택 계수로 Backend가 다시 계산해 저장하는 `SCENARIO`입니다. 계수를 입력하지 않으면 에너지·탄소 차이는 `null`이며, 실제 감축량이나 실제 전환 실적이 아닙니다.
+- body 없는 기존 API 호환 경로의 후보 전환량도 Scenario일 뿐 실적이 아닙니다. 승인 수량을 모르면 `null`이며 unknown을 0으로 바꾸지 않습니다.
 - Green Receipt는 내부 의사결정 snapshot입니다. 법적 인증서, 실제 인계 증명 또는 암호학적 불변 원장이 아닙니다.
 - MVP에서는 `HANDOFF_CONFIRMED`를 생성하지 않습니다.
 

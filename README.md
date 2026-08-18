@@ -8,6 +8,14 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 `Detect` → `Resource Confirm` → `Resource Passport` → `Semantic Match` → `Rule Check` → `Human Decision` → `ESG Scenario` → `Green Receipt`
 
+## BEFORE → FIND → PROVE
+
+- **BEFORE**: 생산 위험 신호에서 먼저 확인할 건을 선별합니다.
+- **FIND**: 실제 자원 발생을 확인한 뒤 표현이 다른 DEMO 수요 후보를 BGE-M3 의미 검색으로 찾습니다.
+- **PROVE**: semantic similarity와 deterministic Rule을 분리하고, 사람의 최종 결정과 사용자 입력 ESG Scenario를 Backend Green Receipt snapshot으로 기록합니다.
+
+GreenFab Loop는 모든 생산 건을 동일하게 확인하는 대신 위험 상위 건을 먼저 확인하고, 실제 자원이 발생했을 때 관련 수요 후보와 검토 근거를 한 흐름에서 제공해 담당자가 더 빠르게 다음 조치를 검토하도록 돕는 의사결정 지원 서비스입니다.
+
 ## 폴더 구성
 
 - `frontend/`: 사용자 화면과 상호작용을 담당합니다.
@@ -32,7 +40,7 @@ GreenFab Loop는 제조 데이터에서 불량 위험이 높은 생산 건을 �
 
 ## 현재 상태
 
-현재 프런트 Golden Demo 화면, SECOM Detect 재현 파이프라인, FastAPI·PostgreSQL·Alembic 기반 Backend Workflow가 구현되어 있습니다. Backend에는 API key 역할 경계, Detect artifact import, Passport Evidence 개발용 storage, versioned Rule policy catalog, 그리고 선택 가능한 실제 BAAI/bge-m3·ChromaDB Provider가 포함됩니다. 운영 SSO/tenant와 object storage는 후속 범위입니다. 실행 방법과 API 순서는 [`backend/README.md`](backend/README.md)를 참고합니다.
+현재 프런트 Golden Demo 화면, SECOM Detect 재현 파이프라인, FastAPI·PostgreSQL·Alembic 기반 Backend Workflow가 구현되어 있습니다. 실제 `BAAI/bge-m3`·ChromaDB runtime은 고정 revision으로 실행·검증했으며 Mock은 별도의 Golden Demo precomputed snapshot으로 명시합니다. 사용자 입력 ESG Scenario와 Green Receipt는 Backend에 저장되고 새로고침 후 CaseEnvelope로 복원되며, `receipt_id` 기반 read-only Verify를 제공합니다. 자원·수요는 합성 DEMO이고 Match 평가는 질의 6개·후보 3개의 소규모 synthetic 기능 검증이므로 산업 일반 성능을 의미하지 않습니다. 실행 절차는 [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md), API 순서는 [`backend/README.md`](backend/README.md)를 참고합니다.
 
 ## 팀 작업 가이드
 

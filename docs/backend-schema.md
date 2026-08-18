@@ -232,13 +232,13 @@ Demand 변경과 Chroma side effect 사이의 복구 가능한 최소 outbox/aud
 | `case_id` | `VARCHAR(64)` | FK cases, UNIQUE |
 | `decision_id` | `VARCHAR(64)` | FK decisions, UNIQUE, RESTRICT |
 | `source_type` | `VARCHAR` | 반드시 `SCENARIO` |
-| `inputs` | `JSONB` | resource quantity, unit, decision status |
-| `results` | `JSONB` | candidate diversion quantity, unit |
-| `formula_version` | `VARCHAR(255)` | `candidate_diversion_v0.1` |
-| `factor_source` | `TEXT` | MVP에서는 null |
+| `inputs` | `JSONB` | 사용자 수량·기준/대안 경로·선택 계수 또는 legacy 입력 |
+| `results` | `JSONB` | 적용 수량·에너지/탄소 차이 또는 legacy 후보 전환량 |
+| `formula_version` | `VARCHAR(255)` | `ESG-SCENARIO-v0.1` 또는 호환용 `candidate_diversion_v0.1` |
+| `factor_source` | `TEXT` | 계수 사용 시 출처, 미사용 시 null |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | 서버 생성 |
 
-Case당 하나이며 `decision_id`로 Scenario를 만든 정확한 사람 Decision까지 추적합니다. 같은 Case에서 재요청하면 기존 Scenario를 반환합니다. 승인 수량이 unknown이면 결과도 `null`로 보존합니다.
+Case당 하나이며 `decision_id`로 Scenario를 만든 정확한 사람 Decision까지 추적합니다. Receipt 생성 전에는 같은 row를 재계산할 수 있고, Receipt 생성 후에는 snapshot 보호를 위해 수정하지 않습니다.
 
 ### `receipts`
 

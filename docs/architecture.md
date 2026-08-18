@@ -54,7 +54,7 @@ flowchart LR
 | BGE-M3 / ChromaDB | Passport 텍스트와 활성 Demand 텍스트의 Top-k 의미 유사도 검색 | 안전성·성공확률·실제 산업 적합성 판단 |
 | Rule Service | 수량, 필수정보, 위치 등 명시적 조건의 결정론적 검사 | LLM 기반 조건 생성, 최종 승인·거절 |
 | Human Decision | 후보 선택과 `APPROVED`, `HOLD`, `REJECTED` 입력 | AI가 대신 수행할 수 없음 |
-| Scenario Service | 사용자 입력값과 명시된 수식으로 후보 전환량 계산 | 검증되지 않은 탄소 감축량이나 실제 전환 실적 생성 |
+| Scenario Service | 사용자 입력 수량·경로·선택 계수를 명시된 수식으로 재계산·저장 | 검증되지 않은 계수 생성, 실제 탄소 감축량이나 전환 실적 주장 |
 | Receipt Service | 생성 시점의 전체 Case를 JSONB 스냅샷으로 기록 | 실제 물류 인계 확인, 법적 인증서 발행 |
 
 ## 4. 실행 파이프라인
@@ -67,7 +67,7 @@ flowchart LR
 6. Match Provider가 후보를 반환하고 Rule Service가 명시적 조건을 검사합니다.
 7. Backend가 짧은 persist transaction에서 입력 snapshot을 재검증하고 Match 후보를 저장합니다.
 8. 사람이 후보와 근거를 확인한 뒤 최종 Decision을 입력합니다.
-9. Scenario Service가 `candidate_diversion_quantity`만 계산합니다.
+9. Scenario Service가 사용자 입력 수량·경로·선택 계수를 `ESG-SCENARIO-v0.1`로 재계산해 저장합니다.
 10. Receipt Service가 전체 결정 상태를 스냅샷으로 저장합니다.
 
 상세 상태 전이는 [`workflow.md`](./workflow.md), API 요청·응답은 [`api-contract.md`](./api-contract.md), 관계형 스키마는 [`backend-schema.md`](./backend-schema.md)를 따릅니다.
@@ -144,7 +144,7 @@ MatchProvider.match(passport, top_k) -> MatchResult
 | SHAP | `REAL` | 예측 기여도이며 원인·인과관계가 아님 |
 | DEMO 현장 확인·Passport·Demand | `DEMO` | 실제 제조 현장 정보로 주장하지 않음 |
 | DEMO 입력 기반 BGE-M3 Match | `DEMO` | 실제 계산값이어도 입력 출처가 DEMO이므로 DEMO |
-| ESG 후보 전환량 | `SCENARIO` | 계산된 후보량이며 실제 전환·감축 실적이 아님 |
+| ESG 사용자 입력·계산 결과 | `SCENARIO` | 가정 비교이며 실제 전환·감축 실적이 아님 |
 
 `COMPUTED`, `HUMAN`, `LOCAL` 같은 값을 `source_type`에 추가하지 않습니다. 사람의 입력 여부와 저장 상태는 별도 필드와 Audit Event로 표현합니다.
 
