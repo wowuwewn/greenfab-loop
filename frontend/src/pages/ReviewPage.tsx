@@ -434,9 +434,33 @@ export function ReviewPage({
                   {errors.candidate && <strong className="review-field-error">{errors.candidate}</strong>}
                 </div>
 
-                <label className="decision-reason-field">
-                  <span>결정 사유 <em>필수 · 10자 이상</em></span>
+                <div className="decision-reason-field">
+                  <div className="decision-reason-heading">
+                    <label htmlFor="decision-reason">
+                      결정 사유 <em>필수 · 10자 이상</em>
+                    </label>
+                    <button
+                      className="decision-demo-fill-button"
+                      type="button"
+                      onClick={() => {
+                        const demoReason =
+                          decisionStatus === 'APPROVED'
+                            ? 'DEMO: 의미 유사도와 Rule 확인 결과를 참고해 담당자가 소량 파일럿 검토를 승인합니다. 실제 활용 적합성은 별도 확인합니다.'
+                            : decisionStatus === 'HOLD'
+                              ? 'DEMO: 의미 유사도와 Rule 확인 결과를 참고했으나 필수정보 확인이 필요해 담당자가 추가 검토 전까지 보류합니다.'
+                              : decisionStatus === 'REJECTED'
+                                ? 'DEMO: 의미 유사도와 명시된 Rule 조건을 검토한 결과 담당자가 현재 후보를 제외합니다.'
+                                : 'DEMO: 의미 유사도와 Rule 확인 결과를 참고하고, 담당자가 실제 활용 조건을 추가 검토합니다.'
+                        setReason(demoReason)
+                        setErrors((current) => ({ ...current, reason: undefined }))
+                      }}
+                      disabled={!hasCandidates || isSaving}
+                    >
+                      데모 사유 자동입력
+                    </button>
+                  </div>
                   <textarea
+                    id="decision-reason"
                     rows={4}
                     maxLength={2000}
                     placeholder="예: 성분 분석 완료 후 소량 파일럿 검토를 진행합니다."
@@ -457,7 +481,7 @@ export function ReviewPage({
                       {errors.reason}
                     </strong>
                   )}
-                </label>
+                </div>
 
                 <button
                   className="primary-button review-save-button"
