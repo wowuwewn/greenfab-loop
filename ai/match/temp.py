@@ -130,22 +130,42 @@ def similarity_search(db:Chroma, query, k):
     
     return docs, scores
 
-def rule_check(docs, passport:json):
+def rule_check(docs, passport:dict):
     total_report = []
+    
     for doc in docs:
-        report = []
+        report = {}
         meta = doc.metadata
-        report.append(meta['demand_id'])
         
-        quantity_report = f"Passport: {passport['quantity']['value']} Demand: {meta['quantity_min']} ~ {meta['quantity_max']}"
-        report.append(quantity_report)
+        report['demand_id'] = meta['demand_id']
+        report['company_name'] = meta['company_name']
+        report['demand_description'] = meta['demand_description']
+
         
-        if passport['quantity']['value'] >= meta['quantity_min'] and passport['quantity']['value'] <= meta['quantity_max']:
-            report.append("Pass")
+        
+        #quantity_report = f"Passport: {passport['quantity']['value']} Demand: {meta['quantity_min']} ~ {meta['quantity_max']}"
+        #report.append(quantity_report)
+        
+        if passport.get('quantity') is None:
+            quantity_check = "null"
+        elif passport['quantity'] >= meta.get('required_quantity', 0):
+            quantity_check = "pass"
         else:
-            report.append("Fail")
+            quantity_check = "fail"
         
-        condition_report = f"Passport condition: {passport['condition']}"
+        if meta.get('location'):
+            location_check = "pass"
+        else:
+            location_check = "fail"
+            
+        report["rule_check"] = {
+            "quantity": quantity_check,
+            "location": location_check
+        }
+        
+        total_report.append(report)
+        
+        '''condition_report = f"Passport condition: {passport['condition']}"
         report.append(condition_report)
         
         if any(condition in passport['condition'] for condition in meta['accepted_conditions']):
@@ -154,9 +174,12 @@ def rule_check(docs, passport:json):
             report.append('Fail')
             
         description = " ".join(report)
-        total_report.append(description)
+        total_report.append(description)'''
     
-    return total_report  
+    json_report = json.dumps(total_report, ensure_ascii= False, indent=2)
+    return json_report
+    
+      
 
 if __name__ == '__main__':
     load_dotenv()
@@ -166,15 +189,15 @@ if __name__ == '__main__':
     with open('../../data/demo/passport.json', 'r', encoding='utf-8') as f:
         passport = json.load(f)
    
-    desc = passport.get('description') or ''
-    cond = passport.get('condition') or ''
-    comp = passport.get('composition') or ''
+    desc = passport[0].get('description') or ''
+    cond = passport[0].get('condition') or ''
+    comp = passport[0].get('composition') or ''
     
     query = ", ".join([d for d in [desc, cond, comp] if d])  
     
     docs, scores = similarity_search(data_db, query, 1)
     
-    report = rule_check(docs, passport)
+    report = rule_check(docs, passport[0])
     print(report)
     ####
     #print([(doc.page_content, doc.metadata, score) for doc,score in zip(docs,scores)])
