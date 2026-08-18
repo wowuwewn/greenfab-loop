@@ -9,15 +9,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 ARG INSTALL_MATCH_RUNTIME=false
+ARG INSTALL_STORAGE_RUNTIME=false
 
 RUN addgroup --system greenfab && adduser --system --ingroup greenfab greenfab
 
 COPY pyproject.toml alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY scripts ./scripts
 
 RUN if [ "$INSTALL_MATCH_RUNTIME" = "true" ]; then \
-        pip install --no-cache-dir '.[match]'; \
+        bash scripts/install_match_runtime.sh; \
+    elif [ "$INSTALL_STORAGE_RUNTIME" = "true" ]; then \
+        pip install --no-cache-dir '.[storage]'; \
     else \
         pip install --no-cache-dir .; \
     fi \

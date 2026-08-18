@@ -10,6 +10,7 @@ FastAPI, PostgreSQL, SQLAlchemy와 Alembic으로 구현한 GreenFab Loop MVP Bac
 - [Data Contract v0.1](../docs/data-contract.md)
 - [Golden Demo](../docs/demo-flow.md)
 - [Backend Productization Foundations](../docs/backend-productization.md)
+- [Render Backend Deployment](../docs/render-deployment.md)
 
 ## 1. Docker Compose로 시작
 
@@ -106,7 +107,9 @@ alembic revision --autogenerate -m "describe change"
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | 허용 Frontend origin JSON array |
 | `AUTH_MODE` | `demo` | 로컬 명시 Demo 또는 API key 필수 mode |
 | `API_KEY_CREDENTIALS` | `[]` | 평문이 아닌 key SHA-256와 actor/role JSON |
-| `EVIDENCE_*` | `.env.example` 참고 | 로컬 Evidence 경로와 최대 upload 크기 |
+| `EVIDENCE_STORAGE_BACKEND` | `local` | 로컬 개발은 filesystem, production은 `s3` 필수 |
+| `EVIDENCE_S3_*` | `.env.example` 참고 | AWS S3/R2 등 S3-compatible private object storage |
+| `EVIDENCE_MAX_BYTES` | `5242880` | Evidence 최대 upload 크기 |
 | `DETECT_ARTIFACT_MAX_BYTES` | `20971520` | Detect import artifact 최대 크기 |
 | `MATCH_PROVIDER` | `mock` | `mock` 또는 명시적인 `bge_chroma`; 장애 시 자동 fallback 없음 |
 | `BGE_MODEL_NAME`, `BGE_MODEL_REVISION` | `BAAI/bge-m3`, `5617a9f…` | embedding 모델과 고정 Hugging Face revision |
@@ -141,6 +144,10 @@ DEMO_RESET_ENABLED=false
 또한 Production은 `AUTH_MODE=required`와 하나 이상의 hash 기반
 `API_KEY_CREDENTIALS`가 필요합니다. 자세한 role과 설정은
 [`backend-productization.md`](../docs/backend-productization.md)를 참고합니다.
+Production은 Render 같은 ephemeral filesystem에 Evidence를 남기지 않도록
+`EVIDENCE_STORAGE_BACKEND=s3`도 강제합니다. S3 runtime을 선택하는 설치는
+`python -m pip install -e ".[storage]"`이며 bucket/endpoint/credential은 환경변수로만
+주입합니다.
 
 ### Detect artifact Import
 
@@ -154,11 +161,20 @@ python -m app.cli.import_detect ../data/outputs/detect/dashboard_data.json \
 
 ### 실제 BGE-M3·ChromaDB 실행
 
-Core 설치는 대형 ML package나 모델을 받지 않습니다. 실제 Provider를 선택할 때만 optional extra를 설치합니다.
+Core 설치는 대형 ML package나 모델을 받지 않습니다. 실제 Provider를 선택할 때만 optional
+extra를 설치합니다. Linux/Render CPU 배포에서는 일반 PyPI의 torch가 CUDA/NVIDIA package를
+함께 선택하지 않도록 공식 PyTorch CPU wheel index를 사용하는 설치 script를 먼저 실행합니다.
 
 ```bash
-python -m pip install -e ".[dev,match]"
+bash scripts/install_match_runtime.sh
+python -m pip install -e ".[dev]"
 ```
+
+script는 torch 2.7.1 CPU wheel을 설치한 뒤 match/storage extras를 설치하고
+`torch.version.cuda is None`과 dependency consistency를 검사합니다. Render는 Python
+3.12.11로 고정하며, 공식 CPU index에 CPython 3.12용 Linux x86_64/aarch64 wheel이 모두
+있는 것을 확인했습니다. 실제 Render build log에서 이 검사가 성공하기 전에는 CUDA package
+제거가 검증됐다고 간주하지 않습니다.
 
 embedded persistent Chroma를 사용할 때 `.env`를 다음처럼 설정합니다.
 

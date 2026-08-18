@@ -14,7 +14,7 @@ from app.seed import seed_demo_data
 from app.services.demand import complete_index_event, create_index_event
 from app.services.match import DemandIndexManager, MatchProvider
 from app.services.runtime_match import build_match_provider
-from app.storage import EvidenceStorage, LocalEvidenceStorage
+from app.storage import EvidenceStorage, build_evidence_storage
 
 
 def create_app(
@@ -73,9 +73,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.match_provider = configured_provider
-    application.state.evidence_storage = evidence_storage or LocalEvidenceStorage(
-        settings.evidence_storage_root
-    )
+    application.state.evidence_storage = evidence_storage or build_evidence_storage(settings)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

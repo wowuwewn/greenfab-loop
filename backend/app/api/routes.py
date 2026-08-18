@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
 from fastapi import Path as ApiPath
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -658,7 +659,7 @@ def read_passport_evidence(
 
 @api_router.get(
     "/cases/{case_id}/resource-passport/evidence/{evidence_id}/content",
-    response_class=FileResponse,
+    response_class=StreamingResponse,
 )
 def download_passport_evidence(
     case_id: str,
@@ -666,13 +667,31 @@ def download_passport_evidence(
     request: Request,
     db: DbSession,
     _principal: ViewerPrincipal,
-) -> FileResponse:
+) -> StreamingResponse:
     evidence = get_passport_evidence(db, case_id, evidence_id)
-    path = _evidence_storage(request).resolve(evidence.storage_key)
-    return FileResponse(
-        path,
+    storage = _evidence_storage(request)
+    storage_context = storage.open(evidence.storage_key)
+    stream = storage_context.__enter__()
+    try:
+        first_chunk = stream.read(64 * 1024)
+    except BaseException as exc:
+        storage_context.__exit__(type(exc), exc, exc.__traceback__)
+        raise
+
+    def content_chunks():
+        try:
+            if first_chunk:
+                yield first_chunk
+            while chunk := stream.read(64 * 1024):
+                yield chunk
+        finally:
+            storage_context.__exit__(None, None, None)
+
+    encoded_filename = quote(evidence.original_filename, safe="")
+    return StreamingResponse(
+        content_chunks(),
         media_type=evidence.media_type,
-        filename=evidence.original_filename,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 

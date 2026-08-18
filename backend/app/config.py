@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.enums import ApiRole
@@ -52,7 +52,16 @@ class Settings(BaseSettings):
     auth_mode: Literal["demo", "required"] = "demo"
     api_key_credentials: list[ApiKeyCredential] = Field(default_factory=list)
     demo_actor: str = Field(default="demo_operator", min_length=1, max_length=120)
+    evidence_storage_backend: Literal["local", "s3"] = "local"
     evidence_storage_root: Path = Path("var/evidence")
+    evidence_s3_bucket: str = ""
+    evidence_s3_prefix: str = "greenfab/evidence"
+    evidence_s3_region: str | None = None
+    evidence_s3_endpoint_url: str | None = None
+    evidence_s3_access_key_id: SecretStr | None = None
+    evidence_s3_secret_access_key: SecretStr | None = None
+    evidence_s3_session_token: SecretStr | None = None
+    evidence_s3_addressing_style: Literal["auto", "path", "virtual"] = "auto"
     evidence_max_bytes: int = Field(default=5 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
     detect_artifact_max_bytes: int = Field(
         default=20 * 1024 * 1024,
@@ -67,6 +76,35 @@ class Settings(BaseSettings):
         if not stripped:
             raise ValueError("DEMO_ACTOR cannot be blank")
         return stripped
+
+    @field_validator("database_url")
+    @classmethod
+    def use_psycopg_driver_for_render_postgres(cls, value: str) -> str:
+        """Normalize Render's connectionString for the installed psycopg v3 driver."""
+
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
+
+    @field_validator(
+        "evidence_s3_bucket",
+        "evidence_s3_prefix",
+        mode="before",
+    )
+    @classmethod
+    def strip_storage_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip()
+
+    @field_validator("evidence_s3_region", "evidence_s3_endpoint_url", mode="before")
+    @classmethod
+    def strip_optional_storage_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return value.strip() or None
 
     @field_validator("cors_origins")
     @classmethod
@@ -114,6 +152,11 @@ class Settings(BaseSettings):
         if environment == "production":
             if self.auth_mode != "required":
                 raise ValueError("AUTH_MODE must be required in production")
+            if self.evidence_storage_backend != "s3":
+                raise ValueError(
+                    "EVIDENCE_STORAGE_BACKEND must be s3 in production; Render's local "
+                    "filesystem is ephemeral"
+                )
         if self.auth_mode == "demo" and environment not in demo_environments:
             raise ValueError("AUTH_MODE=demo is allowed only in development, test, or local")
         if self.auth_mode == "demo" and not self.demo_mode:
@@ -128,6 +171,13 @@ class Settings(BaseSettings):
         ]
         if len(secret_hashes) != len(set(secret_hashes)):
             raise ValueError("API_KEY_CREDENTIALS secret hashes must be unique")
+        if self.evidence_storage_backend == "s3":
+            if not self.evidence_s3_bucket:
+                raise ValueError("EVIDENCE_S3_BUCKET is required for s3 storage")
+            if self.evidence_s3_access_key_id is None:
+                raise ValueError("EVIDENCE_S3_ACCESS_KEY_ID is required for s3 storage")
+            if self.evidence_s3_secret_access_key is None:
+                raise ValueError("EVIDENCE_S3_SECRET_ACCESS_KEY is required for s3 storage")
         return self
 
 
