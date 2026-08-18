@@ -4,18 +4,22 @@ import type { WorkflowStep } from '../types/loop'
 interface WorkflowStepperProps {
   steps: WorkflowStep[]
   activeStep?: number
+  completedStepIndexes?: number[]
 }
 
 export function WorkflowStepper({
   steps,
   activeStep = 0,
+  completedStepIndexes,
 }: WorkflowStepperProps) {
   return (
     <nav className="workflow" aria-label="GreenFab Loop 진행 단계">
       <ol className="workflow__list">
         {steps.map((step, index) => {
           const isActive = index === activeStep
-          const isComplete = index < activeStep
+          const isComplete = completedStepIndexes
+            ? completedStepIndexes.includes(index)
+            : index < activeStep
 
           return (
             <li

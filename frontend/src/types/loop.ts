@@ -30,6 +30,41 @@ export interface ResourcePassport {
   source_type: SourceType
 }
 
+export interface RuleCheck {
+  quantity: boolean | null
+  required_info: boolean | null
+  location: boolean | null
+  missing_fields: string[] | null
+}
+
+export type MatchCandidateStatus = 'REVIEW' | 'NEEDS_INFO' | 'RULE_FAIL'
+
+export interface MatchCandidate {
+  demand_id: string
+  company_name: string
+  demand_description: string
+  semantic_similarity: number | null
+  rule_check: RuleCheck
+  status: MatchCandidateStatus
+}
+
+export interface Match {
+  model: string
+  created_at: string | null
+  source_type: SourceType
+  candidates: MatchCandidate[]
+}
+
+export type DecisionStatus = 'APPROVED' | 'HOLD' | 'REJECTED'
+
+export interface Decision {
+  status: DecisionStatus
+  selected_demand_id: string | null
+  reason: string | null
+  decided_by: string
+  decided_at: string
+}
+
 export interface DetectAnalysis {
   dataset_name: string
   model_name: string
