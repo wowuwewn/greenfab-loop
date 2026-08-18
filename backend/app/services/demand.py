@@ -252,6 +252,29 @@ def list_index_events(session: Session, *, limit: int = 100) -> list[DemandIndex
     )
 
 
+def recover_pending_index_events(session: Session) -> int:
+    """Close index events left PENDING by a previous process crash.
+
+    A startup full reconciliation creates a new event and converges Chroma to
+    PostgreSQL. Keeping abandoned rows PENDING would incorrectly imply active work.
+    """
+
+    records = session.scalars(
+        select(DemandIndexEvent)
+        .where(DemandIndexEvent.status == "PENDING")
+        .order_by(DemandIndexEvent.created_at.asc(), DemandIndexEvent.event_id.asc())
+        .with_for_update()
+    ).all()
+    processed_at = datetime.now(UTC)
+    for event in records:
+        event.status = "FAILED"
+        event.attempt_count += 1
+        event.error_message = "RecoveredOnStartup"
+        event.processed_at = processed_at
+    session.flush()
+    return len(records)
+
+
 def get_index_event_for_retry(session: Session, event_id: str) -> DemandIndexEvent:
     event = session.scalar(
         select(DemandIndexEvent).where(DemandIndexEvent.event_id == event_id).with_for_update()

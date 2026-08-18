@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.config import ApiKeyCredential, settings
 from app.enums import ApiRole
 from app.models import DemandIndexEvent
+from app.services.demand import create_index_event, recover_pending_index_events
 from app.services.match import IndexSyncResult, MockMatchProvider
 
 DEMAND = {
@@ -185,6 +186,27 @@ def test_failed_index_event_can_be_retried_as_current_desired_state(client) -> N
     assert retried.json()["status"] == "SUCCEEDED"
     assert retried.json()["event_id"] != original["event_id"]
     assert provider.upserted == [DEMAND["demand_id"]]
+
+
+def test_startup_recovery_closes_abandoned_pending_index_events(session_factory) -> None:
+    with session_factory.begin() as session:
+        abandoned = create_index_event(
+            session,
+            operation="SYNC_ALL",
+            requested_by="previous-process",
+        )
+        event_id = abandoned.event_id
+
+    with session_factory.begin() as session:
+        assert recover_pending_index_events(session) == 1
+
+    with session_factory() as session:
+        recovered = session.get(DemandIndexEvent, event_id)
+        assert recovered is not None
+        assert recovered.status == "FAILED"
+        assert recovered.attempt_count == 1
+        assert recovered.error_message == "RecoveredOnStartup"
+        assert recovered.processed_at is not None
 
 
 def test_demand_rbac_uses_api_principal_and_ignores_x_actor(

@@ -150,8 +150,29 @@ class BgeM3ChromaAdapter:
         return len(unique_ids)
 
     def list_ids(self) -> set[str]:
-        response = self._get_collection().get(include=[])
-        return {str(demand_id) for demand_id in response.get("ids", [])}
+        return set(self.list_indexed_documents())
+
+    def list_indexed_documents(self) -> dict[str, tuple[int | None, str | None]]:
+        response = self._get_collection().get(include=["metadatas"])
+        ids = [str(demand_id) for demand_id in response.get("ids", [])]
+        metadatas = response.get("metadatas") or [None] * len(ids)
+        if len(metadatas) != len(ids):
+            raise RuntimeError("Chroma returned inconsistent Demand metadata")
+        return {
+            demand_id: (
+                (
+                    int(metadata["demand_version"])
+                    if metadata and metadata.get("demand_version") is not None
+                    else None
+                ),
+                (
+                    str(metadata["demand_content_sha256"])
+                    if metadata and metadata.get("demand_content_sha256")
+                    else None
+                ),
+            )
+            for demand_id, metadata in zip(ids, metadatas, strict=True)
+        }
 
     def _encode(self, texts: Sequence[str]) -> list[list[float]]:
         vectors = self._get_model().encode(
@@ -349,9 +370,15 @@ class BgeChromaMatchProvider:
         with self._runtime_lock:
             documents = self.catalog.list_active_documents()
             desired_ids = {document.demand_id for document in documents}
-            stale_ids = self.adapter.list_ids() - desired_ids
+            indexed = self.adapter.list_indexed_documents()
+            changed_documents = [
+                document
+                for document in documents
+                if indexed.get(document.demand_id) != (document.version, document.content_sha256)
+            ]
+            stale_ids = set(indexed) - desired_ids
             return IndexSyncResult(
-                upserted=self.adapter.upsert(documents),
+                upserted=self.adapter.upsert(changed_documents),
                 deleted=self.adapter.delete(sorted(stale_ids)),
             )
 

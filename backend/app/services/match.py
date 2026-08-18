@@ -156,6 +156,9 @@ class SemanticSearchAdapter(Protocol):
     def list_ids(self) -> set[str]:
         """Return every demand_id currently present in the vector index."""
 
+    def list_indexed_documents(self) -> dict[str, tuple[int | None, str | None]]:
+        """Return indexed Demand lineage as ``id -> (version, content hash)``."""
+
 
 @runtime_checkable
 class DemandIndexManager(Protocol):

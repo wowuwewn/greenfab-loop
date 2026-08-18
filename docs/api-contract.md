@@ -72,6 +72,8 @@
 | 413 | `EVIDENCE_TOO_LARGE` | Evidence upload 제한 초과 |
 | 503 | `MATCH_UNAVAILABLE` | 주입된 Match Provider 실행 실패 |
 | 503 | `DEMAND_INDEX_UNAVAILABLE` | PostgreSQL 저장 후 Chroma 동기화 실패 |
+| 503 | `EVIDENCE_STORAGE_UNAVAILABLE` | Evidence object storage 접근 실패 |
+| 503 | `EVIDENCE_INTEGRITY_FAILED` | 저장 object의 크기 또는 SHA-256 불일치 |
 | 503 | `DATABASE_UNAVAILABLE` | SQLAlchemy/PostgreSQL 요청 처리 실패 |
 | 500 | `INTEGRITY_ERROR` | 저장 관계가 불완전함 |
 | 500 | `INTERNAL_ERROR` | 처리되지 않은 예외의 안전한 공통 응답 |
@@ -189,7 +191,10 @@ index event를 만들지 않고 현재 표현을 그대로 반환합니다.
 
 ### `POST /api/v1/demands/index/sync`
 
-활성 PostgreSQL Demand 전체를 upsert하고 DB에 없는 Chroma ID를 삭제합니다. Mock Provider에서는 `409 DEMAND_INDEX_NOT_CONFIGURED`입니다.
+활성 PostgreSQL Demand와 Chroma의 version/content hash를 비교해 변경·누락된 문서만
+upsert하고 DB에 없는 stale Chroma ID를 삭제합니다. 응답의 `upserted`는 전체 활성 건수가
+아니라 실제로 새 embedding을 저장한 건수입니다. Mock Provider에서는
+`409 DEMAND_INDEX_NOT_CONFIGURED`입니다.
 
 ### `GET /api/v1/demands/index/events`
 
@@ -202,7 +207,8 @@ index event를 만들지 않고 현재 표현을 그대로 반환합니다.
 
 `FAILED` 또는 `SKIPPED` event를 현재 PostgreSQL Demand 상태 기준의 새 event로 재시도합니다.
 활성이면 `UPSERT`, 비활성이면 `DELETE`로 다시 결정합니다. 이미 성공했거나 실행 중인
-`PENDING` event는 `409`이며, crash로 남은 `PENDING` 복구에는 관리자 전체 sync를 사용합니다.
+`PENDING` event는 `409`입니다. crash로 남은 `PENDING`은 다음 startup에서 FAILED로 전환하고
+새 SYNC_ALL event로 reconcile하며, 관리자는 전체 sync를 명시 실행할 수도 있습니다.
 
 Create/update/deactivate는 PostgreSQL transaction에서 `demand_index_events=PENDING`을 함께 저장한 뒤 commit 밖에서 BGE index를 동기화합니다. Chroma만 실패하면 DB는 source of truth로 남고 event는 `FAILED`, API는 `503 DEMAND_INDEX_UNAVAILABLE`가 됩니다. 복구는 event retry 또는 전체 sync이며 자동 retry/backoff worker는 후속 범위입니다.
 
@@ -445,7 +451,10 @@ Errors: `404 NOT_FOUND`
 
 Passport Evidence upload/list/download와 versioned Rule policy catalog는
 [`backend-productization.md`](./backend-productization.md)에 정의합니다. Evidence는 7-key
-CaseEnvelope를 확장하지 않는 별도 endpoint입니다. Rule catalog의 active policy revision은 Match 실행 시 snapshot으로 고정합니다.
+CaseEnvelope를 확장하지 않는 별도 endpoint입니다. Upload storage I/O는 DB transaction 밖에서
+실행한 뒤 최종 Workflow 상태를 다시 검증합니다. Content download는 저장된 size/SHA-256을
+응답 전에 검증하고 `Cache-Control: private, no-store`, `Pragma: no-cache`,
+`X-Content-Type-Options: nosniff`를 반환합니다. Rule catalog의 active policy revision은 Match 실행 시 snapshot으로 고정합니다.
 
 ## 14. Contract test 최소 목록
 

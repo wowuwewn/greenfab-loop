@@ -146,13 +146,25 @@ def test_passport_evidence_upload_validates_and_downloads(
     assert downloaded.status_code == 200
     assert downloaded.content == png
     assert downloaded.headers["content-type"] == "image/png"
+    assert downloaded.headers["content-length"] == str(len(png))
+    assert downloaded.headers["cache-control"] == "private, no-store, max-age=0"
+    assert downloaded.headers["pragma"] == "no-cache"
+    assert downloaded.headers["x-content-type-options"] == "nosniff"
 
     with session_factory() as session:
         stored = session.scalar(
             select(PassportEvidence).where(PassportEvidence.evidence_id == body["evidence_id"])
         )
         assert stored is not None
-        assert evidence_storage.resolve(stored.storage_key).read_bytes() == png
+        stored_path = evidence_storage.resolve(stored.storage_key)
+        assert stored_path.read_bytes() == png
+        stored_path.write_bytes(png + b"tampered")
+
+    corrupted = client.get(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/resource-passport/evidence/{body['evidence_id']}/content"
+    )
+    assert corrupted.status_code == 503
+    assert corrupted.json()["error"]["code"] == "EVIDENCE_INTEGRITY_FAILED"
 
     mismatched = client.post(
         f"/api/v1/cases/{GOLDEN_CASE_ID}/resource-passport/evidence",
@@ -198,6 +210,40 @@ def test_evidence_size_limit_and_demo_reset_cleanup(
     assert client.post("/api/v1/demo/reset").status_code == 200
     with pytest.raises(DomainError):
         evidence_storage.resolve(storage_key)
+
+
+def test_evidence_upload_rechecks_state_after_object_io_and_compensates(
+    client, session_factory, evidence_storage, monkeypatch
+) -> None:
+    client.put(f"/api/v1/cases/{GOLDEN_CASE_ID}/resource-confirmation", json=CONFIRMATION)
+    client.put(f"/api/v1/cases/{GOLDEN_CASE_ID}/resource-passport", json=PASSPORT)
+    original_save = evidence_storage.save
+    captured = {}
+
+    def racing_save(stream, *, media_type: str, max_bytes: int):
+        stored = original_save(stream, media_type=media_type, max_bytes=max_bytes)
+        captured["storage_key"] = stored.storage_key
+        with session_factory.begin() as session:
+            case = session.get(Case, GOLDEN_CASE_ID)
+            assert case is not None
+            case.workflow_status = WorkflowStatus.DECIDED
+        return stored
+
+    monkeypatch.setattr(evidence_storage, "save", racing_save)
+    png = b"\x89PNG\r\n\x1a\nstate-race"
+
+    rejected = client.post(
+        f"/api/v1/cases/{GOLDEN_CASE_ID}/resource-passport/evidence",
+        data={"evidence_type": "PHOTO"},
+        files={"file": ("inspection.png", png, "image/png")},
+    )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["code"] == "INVALID_STATE"
+    with pytest.raises(DomainError):
+        evidence_storage.resolve(captured["storage_key"])
+    with session_factory() as session:
+        assert session.scalar(select(PassportEvidence)) is None
 
 
 def test_rule_policy_catalog_versions_and_activation(client) -> None:

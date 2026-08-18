@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import PurePath
+from tempfile import SpooledTemporaryFile
 from typing import BinaryIO
 
 from sqlalchemy import select
@@ -11,29 +16,78 @@ from sqlalchemy.orm import Session
 
 from app.enums import EvidenceType, WorkflowStatus
 from app.errors import DomainError
-from app.models import AuditEvent, PassportEvidence, ResourcePassport
+from app.models import AuditEvent, Case, PassportEvidence, ResourcePassport
 from app.schemas import PassportEvidenceOut
-from app.services.workflow import get_case_for_update
-from app.storage import EvidenceStorage
+from app.services.workflow import get_case, get_case_for_update
+from app.storage import EvidenceStorage, StoredEvidence
 
 logger = logging.getLogger(__name__)
 
 
-def add_passport_evidence(
+def preflight_passport_evidence_target(session: Session, case_id: str) -> None:
+    """Reject an invalid target before performing object-storage I/O."""
+
+    _passport_evidence_target(session, case_id, for_update=False)
+
+
+def attach_passport_evidence(
     session: Session,
-    storage: EvidenceStorage,
     case_id: str,
     *,
-    stream: BinaryIO,
+    stored: StoredEvidence,
     filename: str | None,
     media_type: str | None,
     evidence_type: EvidenceType,
     description: str | None,
     actor: str,
-    max_bytes: int,
     trace_id: str | None,
 ) -> PassportEvidence:
-    record = get_case_for_update(session, case_id)
+    record, passport = _passport_evidence_target(session, case_id, for_update=True)
+
+    safe_filename = _safe_filename(filename)
+    normalized_media_type = (media_type or "").split(";", 1)[0].strip().casefold()
+    evidence = PassportEvidence(
+        passport_id=passport.passport_id,
+        storage_key=stored.storage_key,
+        original_filename=safe_filename,
+        media_type=normalized_media_type,
+        size_bytes=stored.size_bytes,
+        sha256=stored.sha256,
+        evidence_type=evidence_type,
+        description=_optional_trimmed(description),
+        source_type=passport.source_type,
+        uploaded_by=actor,
+    )
+    session.add(evidence)
+    session.flush()
+    session.add(
+        AuditEvent(
+            case_id=case_id,
+            event_type="PASSPORT_EVIDENCE_ADDED",
+            actor=actor,
+            from_status=record.workflow_status,
+            to_status=record.workflow_status,
+            payload_json={
+                "evidence_id": evidence.evidence_id,
+                "evidence_type": evidence_type.value,
+                "media_type": normalized_media_type,
+                "size_bytes": stored.size_bytes,
+                "sha256": stored.sha256,
+            },
+            trace_id=trace_id,
+        )
+    )
+    session.flush()
+    return evidence
+
+
+def _passport_evidence_target(
+    session: Session,
+    case_id: str,
+    *,
+    for_update: bool,
+) -> tuple[Case, ResourcePassport]:
+    record = get_case_for_update(session, case_id) if for_update else get_case(session, case_id)
     if record.workflow_status not in {WorkflowStatus.PASSPORT_READY, WorkflowStatus.MATCH_READY}:
         raise DomainError(
             "INVALID_STATE",
@@ -43,47 +97,70 @@ def add_passport_evidence(
     passport = record.resource_passport
     if passport is None:
         raise DomainError("INVALID_STATE", "저장된 Passport가 없습니다.", 409)
+    return record, passport
 
-    safe_filename = _safe_filename(filename)
-    normalized_media_type = (media_type or "").split(";", 1)[0].strip().casefold()
-    stored = storage.save(stream, media_type=normalized_media_type, max_bytes=max_bytes)
+
+@contextmanager
+def open_verified_evidence(
+    storage: EvidenceStorage,
+    *,
+    storage_key: str,
+    expected_size: int,
+    expected_sha256: str,
+) -> Iterator[BinaryIO]:
+    """Verify a bounded object completely before returning any response bytes."""
+
+    hard_limit = 25 * 1024 * 1024
+    if expected_size < 1 or expected_size > hard_limit:
+        raise DomainError(
+            "EVIDENCE_INTEGRITY_FAILED",
+            "Evidence 무결성을 확인할 수 없습니다.",
+            503,
+        )
+    digest = hashlib.sha256()
+    actual_size = 0
     try:
-        evidence = PassportEvidence(
-            passport_id=passport.passport_id,
-            storage_key=stored.storage_key,
-            original_filename=safe_filename,
-            media_type=normalized_media_type,
-            size_bytes=stored.size_bytes,
-            sha256=stored.sha256,
-            evidence_type=evidence_type,
-            description=_optional_trimmed(description),
-            source_type=passport.source_type,
-            uploaded_by=actor,
-        )
-        session.add(evidence)
-        session.flush()
-        session.add(
-            AuditEvent(
-                case_id=case_id,
-                event_type="PASSPORT_EVIDENCE_ADDED",
-                actor=actor,
-                from_status=record.workflow_status,
-                to_status=record.workflow_status,
-                payload_json={
-                    "evidence_id": evidence.evidence_id,
-                    "evidence_type": evidence_type.value,
-                    "media_type": normalized_media_type,
-                    "size_bytes": stored.size_bytes,
-                    "sha256": stored.sha256,
-                },
-                trace_id=trace_id,
-            )
-        )
-        session.flush()
-    except Exception:
-        delete_evidence_safely(storage, stored.storage_key)
+        with (
+            storage.open(storage_key) as source,
+            SpooledTemporaryFile(max_size=min(expected_size, 1024 * 1024), mode="w+b") as verified,
+        ):
+            while True:
+                chunk = source.read(64 * 1024)
+                if not chunk:
+                    break
+                if not isinstance(chunk, bytes):
+                    raise DomainError(
+                        "EVIDENCE_INTEGRITY_FAILED",
+                        "Evidence 무결성을 확인할 수 없습니다.",
+                        503,
+                    )
+                actual_size += len(chunk)
+                if actual_size > expected_size:
+                    raise DomainError(
+                        "EVIDENCE_INTEGRITY_FAILED",
+                        "Evidence 무결성을 확인할 수 없습니다.",
+                        503,
+                    )
+                digest.update(chunk)
+                verified.write(chunk)
+            if actual_size != expected_size or not hmac.compare_digest(
+                digest.hexdigest(), expected_sha256
+            ):
+                raise DomainError(
+                    "EVIDENCE_INTEGRITY_FAILED",
+                    "Evidence 무결성을 확인할 수 없습니다.",
+                    503,
+                )
+            verified.seek(0)
+            yield verified
+    except DomainError:
         raise
-    return evidence
+    except Exception as exc:
+        raise DomainError(
+            "EVIDENCE_STORAGE_UNAVAILABLE",
+            "Evidence storage에서 파일을 읽을 수 없습니다.",
+            503,
+        ) from exc
 
 
 def evidence_storage_keys_for_case(session: Session, case_id: str) -> list[str]:

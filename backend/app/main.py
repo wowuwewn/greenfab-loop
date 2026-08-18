@@ -11,7 +11,11 @@ from app.config import settings
 from app.database import SessionLocal
 from app.errors import register_exception_handlers
 from app.seed import seed_demo_data
-from app.services.demand import complete_index_event, create_index_event
+from app.services.demand import (
+    complete_index_event,
+    create_index_event,
+    recover_pending_index_events,
+)
 from app.services.match import DemandIndexManager, MatchProvider
 from app.services.runtime_match import build_match_provider
 from app.storage import EvidenceStorage, build_evidence_storage
@@ -25,6 +29,7 @@ def create_app(
 ) -> FastAPI:
     should_seed = settings.seed_demo_data if seed_on_startup is None else seed_on_startup
     configured_provider = match_provider or build_match_provider(settings)
+    configured_storage = evidence_storage or build_evidence_storage(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -39,6 +44,7 @@ def create_app(
                 if settings.demand_index_sync_on_startup and isinstance(
                     configured_provider, DemandIndexManager
                 ):
+                    recover_pending_index_events(session)
                     sync_event_id = create_index_event(
                         session,
                         operation="SYNC_ALL",
@@ -64,6 +70,7 @@ def create_app(
                     with SessionLocal.begin() as session:
                         complete_index_event(session, sync_event_id, status="SUCCEEDED")
         configured_provider.ready()
+        configured_storage.check_ready()
         yield
 
     application = FastAPI(
@@ -73,7 +80,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.match_provider = configured_provider
-    application.state.evidence_storage = evidence_storage or build_evidence_storage(settings)
+    application.state.evidence_storage = configured_storage
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

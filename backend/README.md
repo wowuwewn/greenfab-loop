@@ -73,13 +73,14 @@ alembic current
 GitHub의 `Backend CI` workflow는 Python 3.12와 PostgreSQL 16에서 다음 품질
 게이트를 자동 실행합니다.
 
-- core + development dependency만 설치한 테스트와 Ruff 검사
+- core + storage + development dependency를 설치한 테스트와 Ruff 검사
+- SHA-256으로 고정한 Render 공식 JSON Schema와 제품 안전 계약을 이용한 `render.yaml` 검증
 - `upgrade -> check -> downgrade -> re-upgrade` migration 왕복 검증
 - 기본 및 `match` profile의 Docker Compose 구성 검증
 - 실행 중인 FastAPI/PostgreSQL을 통과하는 Golden Workflow smoke test
 
-CI는 `MATCH_PROVIDER=mock`과 offline 환경을 강제하며 `.[match]` extra를 설치하지
-않습니다. 따라서 4.59GB BGE-M3 가중치를 내려받지 않습니다. 선택형 Chroma smoke는
+CI는 `MATCH_PROVIDER=mock`과 offline 환경을 강제하고 app coverage 85% 하한을 적용하며
+`.[match]` extra를 설치하지 않습니다. 따라서 4.59GB BGE-M3 가중치를 내려받지 않습니다. 선택형 Chroma smoke는
 로컬에서 `python -m pip install -e ".[dev,match]"` 후 다음처럼 별도로 실행합니다.
 
 ```bash
@@ -109,6 +110,7 @@ alembic revision --autogenerate -m "describe change"
 | `API_KEY_CREDENTIALS` | `[]` | 평문이 아닌 key SHA-256와 actor/role JSON |
 | `EVIDENCE_STORAGE_BACKEND` | `local` | 로컬 개발은 filesystem, production은 `s3` 필수 |
 | `EVIDENCE_S3_*` | `.env.example` 참고 | AWS S3/R2 등 S3-compatible private object storage |
+| `EVIDENCE_S3_*_TIMEOUT_SECONDS`, `EVIDENCE_S3_MAX_ATTEMPTS` | `3 / 10 / 2` | object storage connect/read 상한과 총 시도 횟수 |
 | `EVIDENCE_MAX_BYTES` | `5242880` | Evidence 최대 upload 크기 |
 | `DETECT_ARTIFACT_MAX_BYTES` | `20971520` | Detect import artifact 최대 크기 |
 | `MATCH_PROVIDER` | `mock` | `mock` 또는 명시적인 `bge_chroma`; 장애 시 자동 fallback 없음 |
@@ -121,7 +123,7 @@ alembic revision --autogenerate -m "describe change"
 | `MATCH_RULE_POLICY_KEY` | `match-deterministic-v0` | v0.1 고정 reserved policy; 다른 값은 시작 거부 |
 | `CHROMA_MODE` | `persistent` | embedded persistent client 또는 `http` server |
 | `CHROMA_*` | `.env.example` 참고 | collection, 경로 또는 HTTP 연결 설정 |
-| `DEMAND_INDEX_SYNC_ON_STARTUP` | `true` | BGE Provider 시작 시 PostgreSQL Demand 전체 재동기화 |
+| `DEMAND_INDEX_SYNC_ON_STARTUP` | `true` | BGE Provider 시작 시 PostgreSQL과 Chroma를 증분 reconcile |
 | `POSTGRES_*` | `.env.example` 참고 | Compose PostgreSQL 설정 |
 
 `DEMO_RESET_ENABLED`는 보안상 기본 `false`입니다. 공개 배포에서는 활성화하지 않습니다. 로컬 시연에서만 `DEMO_MODE=true`를 유지하고 `.env`를 다음처럼 바꾼 뒤 Backend를 재시작합니다.
@@ -147,7 +149,11 @@ DEMO_RESET_ENABLED=false
 Production은 Render 같은 ephemeral filesystem에 Evidence를 남기지 않도록
 `EVIDENCE_STORAGE_BACKEND=s3`도 강제합니다. S3 runtime을 선택하는 설치는
 `python -m pip install -e ".[storage]"`이며 bucket/endpoint/credential은 환경변수로만
-주입합니다.
+주입합니다. production의 custom endpoint는 HTTPS만 허용하며, 시작 시 bucket과 지정 prefix에
+대한 list/head 및 임시 object put/get/delete 권한을 실제로 점검합니다. 업로드 object I/O는
+Case row lock과 DB transaction 밖에서 실행하고, metadata commit 실패 시 생성 object를
+best-effort로 제거합니다. 다운로드는 저장된 크기와 SHA-256을 전부 확인한 뒤에만 전송하며
+private/no-store와 `nosniff` header를 반환합니다.
 
 ### Detect artifact Import
 
@@ -204,7 +210,10 @@ Compose의 Chroma 서비스는 host port를 발행하지 않고 Compose 내부 �
 docker compose --profile match up --build
 ```
 
-BGE 환경에서는 시작 시 모델을 한 번 로드하고 PostgreSQL의 활성 Demand를 Chroma에 upsert합니다. 모델 또는 Chroma 준비가 실패하면 애플리케이션 시작/readiness가 실패하며 Mock으로 전환하지 않습니다.
+BGE 환경에서는 시작 시 모델을 한 번 로드하고 PostgreSQL 활성 Demand의 version/content hash를
+Chroma metadata와 비교해 변경·누락된 문서만 upsert하고 stale ID를 삭제합니다. crash로 남은
+PENDING index event는 시작 시 FAILED로 전환한 뒤 새 SYNC_ALL event로 reconcile합니다. 모델 또는
+Chroma 준비가 실패하면 애플리케이션 시작/readiness가 실패하며 Mock으로 전환하지 않습니다.
 BAAI 공식 모델 카드 기준 bge-m3는 약 567M parameters/4.59GB 규모이므로 모델 파일 외에도 추론 메모리 여유가 필요합니다. Core image에는 포함하지 않고 optional extra로만 설치하며 CPU 기본 batch를 4로 제한합니다. 문서 임베딩과 query 임베딩은 L2 normalize하고 Chroma cosine distance `d`는 `1 - d`로 similarity에 변환합니다. 이 점수는 적합도나 성공확률이 아닙니다.
 Compose의 `greenfab_model_cache` volume은 첫 모델 다운로드를 재사용하고 `greenfab_chroma_data`는 embedded index를 보존합니다.
 
@@ -363,5 +372,5 @@ index event를 불필요하게 늘리지 않습니다.
 - PostgreSQL 기반 동시성·부하 테스트
 - Demand index event 자동 재시도 worker와 backoff/metrics
 - 실제 인계 증빙이 필요할 경우 별도 도메인·법적 검토
-- 운영 object storage, malware scan, retention/deletion worker
+- Evidence malware scan, retention/deletion 및 orphan reconcile worker
 - 실제 inference wall-clock timeout과 multi-worker 부하 제한
