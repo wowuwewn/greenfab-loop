@@ -118,7 +118,11 @@ export function ConfirmPage({
             <div>
               <dt>데이터 출처</dt>
               <dd>
-                <span className="source-badge source-badge--real">REAL</span>
+                <span
+                  className={`source-badge source-badge--${caseData.source_type.toLowerCase()}`}
+                >
+                  {caseData.source_type}
+                </span>
                 UCI SECOM + 모델 결과
               </dd>
             </div>
@@ -128,7 +132,11 @@ export function ConfirmPage({
         <section className="source-transition" aria-label="모델 분석 결과에서 현장 확인 입력으로 전환">
           <div className="source-transition__side">
             <div className="source-transition__heading">
-              <span className="source-badge source-badge--real">REAL</span>
+              <span
+                className={`source-badge source-badge--${caseData.source_type.toLowerCase()}`}
+              >
+                {caseData.source_type}
+              </span>
               <strong>모델 분석 결과</strong>
             </div>
             <div className="source-transition__content">
@@ -153,7 +161,11 @@ export function ConfirmPage({
 
           <div className="source-transition__side">
             <div className="source-transition__heading">
-              <span className="source-badge source-badge--demo">DEMO</span>
+              <span
+                className={`source-badge source-badge--${resourceConfirmation.source_type.toLowerCase()}`}
+              >
+                {resourceConfirmation.source_type}
+              </span>
               <strong>현장 확인 시나리오</strong>
             </div>
             <div className="source-transition__content">

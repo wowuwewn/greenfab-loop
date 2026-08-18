@@ -53,7 +53,7 @@ export function DetectPage({
             <h1 id="page-title">먼저 볼 생산 건을 선별합니다</h1>
             <p>SECOM 분석 결과를 바탕으로 우선 확인할 생산 건을 보여줍니다.</p>
             <div className="provenance" aria-label="데이터 출처">
-              <span className="provenance__badge">REAL</span>
+              <span className="provenance__badge">{caseData.source_type}</span>
               <span className="provenance__text">UCI SECOM + 모델 결과</span>
             </div>
           </div>

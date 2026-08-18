@@ -6,6 +6,9 @@ import {
   FileCheck2,
   RefreshCw,
 } from 'lucide-react'
+import { useState } from 'react'
+import { toApiError, type ApiError } from '../api/client'
+import { ApiErrorMessage } from '../components/ApiErrorMessage'
 import { WorkflowStepper } from '../components/WorkflowStepper'
 import { EsgScenarioForm } from '../components/EsgScenarioForm'
 import { WORKFLOW_STEPS } from '../data/detectData'
@@ -30,8 +33,9 @@ interface ReceiptPageProps {
   decision: Decision | null
   esgScenario: EsgScenario | null
   receipt: Receipt | null
-  onEsgScenarioChange: (scenario: EsgScenario) => void
-  onCreateReceipt: () => void
+  isBusy: boolean
+  onGenerateEsgScenario: () => Promise<void>
+  onCreateReceipt: () => Promise<void>
   onBackToReview: () => void
 }
 
@@ -105,10 +109,12 @@ export function ReceiptPage({
   decision,
   esgScenario,
   receipt,
-  onEsgScenarioChange,
+  isBusy,
+  onGenerateEsgScenario,
   onCreateReceipt,
   onBackToReview,
 }: ReceiptPageProps) {
+  const [receiptError, setReceiptError] = useState<ApiError | null>(null)
   const hasCandidates = Boolean(match && match.candidates.length > 0)
   const selectedCandidate = findSelectedCandidate(match, decision)
   const canCreateReceipt = Boolean(
@@ -117,6 +123,15 @@ export function ReceiptPage({
   const completedStepIndexes = decision ? [0, 1, 2, 3, 4] : [0, 1, 2]
 
   if (!decision && hasCandidates) completedStepIndexes.push(3)
+
+  const createReceipt = async () => {
+    setReceiptError(null)
+    try {
+      await onCreateReceipt()
+    } catch (error) {
+      setReceiptError(toApiError(error))
+    }
+  }
 
   return (
     <div className="app-shell receipt-page">
@@ -165,7 +180,7 @@ export function ReceiptPage({
           <section className="receipt-section decision-record" aria-labelledby="record-title">
             <div className="receipt-section__heading">
               <div>
-                <span>REAL → DEMO → HUMAN</span>
+                <span>{caseData.source_type} → DEMO → HUMAN</span>
                 <h2 id="record-title">의사결정 기록</h2>
               </div>
               <p>AI 후보 탐색과 규칙 확인 이후 사람이 내린 결정을 기록합니다.</p>
@@ -178,7 +193,11 @@ export function ReceiptPage({
                   <span className="receipt-record-label">생산 건</span>
                   <strong>{caseData.case_id}</strong>
                 </div>
-                <span className="receipt-badge receipt-badge--real">REAL</span>
+                <span
+                  className={`receipt-badge receipt-badge--${caseData.source_type.toLowerCase()}`}
+                >
+                  {caseData.source_type}
+                </span>
               </li>
               <li>
                 <span className="receipt-timeline__marker"><Check size={13} /></span>
@@ -186,7 +205,11 @@ export function ReceiptPage({
                   <span className="receipt-record-label">현장 확인</span>
                   <strong>{confirmationLabels[resourceConfirmation.status]}</strong>
                 </div>
-                <span className="receipt-badge receipt-badge--demo">DEMO</span>
+                <span
+                  className={`receipt-badge receipt-badge--${resourceConfirmation.source_type.toLowerCase()}`}
+                >
+                  {resourceConfirmation.source_type}
+                </span>
               </li>
               <li className={resourcePassport ? '' : 'is-pending'}>
                 <span className="receipt-timeline__marker">
@@ -196,7 +219,11 @@ export function ReceiptPage({
                   <span className="receipt-record-label">자원 정보</span>
                   <strong>{resourcePassport?.passport_id ?? '자원 정보 대기'}</strong>
                 </div>
-                <span className="receipt-badge receipt-badge--demo">DEMO</span>
+                <span
+                  className={`receipt-badge receipt-badge--${(resourcePassport?.source_type ?? 'DEMO').toLowerCase()}`}
+                >
+                  {resourcePassport?.source_type ?? 'DEMO'}
+                </span>
               </li>
               <li className={hasCandidates ? '' : 'is-pending'}>
                 <span className="receipt-timeline__marker">
@@ -303,13 +330,14 @@ export function ReceiptPage({
                 <h2 id="esg-title">ESG 시나리오</h2>
               </div>
               <p>
-                사용자 입력값과 입력된 계수를 기준으로 기존 처리 경로와 순환
-                경로의 예상 차이를 계산합니다.
+                저장된 Passport 자원량과 사람의 최종 결정을 기준으로 후보 전환
+                가능량을 계산합니다.
               </p>
             </div>
             <EsgScenarioForm
               esgScenario={esgScenario}
-              onCalculate={onEsgScenarioChange}
+              isBusy={isBusy}
+              onGenerate={onGenerateEsgScenario}
             />
           </section>
 
@@ -344,28 +372,35 @@ export function ReceiptPage({
                 </p>
               </div>
             ) : (
-              <div className="receipt-create">
-                <span className="receipt-create__icon" aria-hidden="true">
-                  <FileCheck2 size={24} strokeWidth={1.7} />
-                </span>
-                <div>
-                  <strong>Green Receipt 생성</strong>
-                  <p>
-                    {esgScenario
-                      ? '생산 건, Resource Passport, 사람의 최종 결정이 모두 있어야 기록을 생성할 수 있습니다.'
-                      : 'ESG 시나리오 계산까지 완료하면 Green Receipt를 생성할 수 있습니다.'}
-                  </p>
+              <>
+                <div className="receipt-create">
+                  <span className="receipt-create__icon" aria-hidden="true">
+                    <FileCheck2 size={24} strokeWidth={1.7} />
+                  </span>
+                  <div>
+                    <strong>Green Receipt 생성</strong>
+                    <p>
+                      {esgScenario
+                        ? '생산 건, Resource Passport, 사람의 최종 결정이 모두 있어야 기록을 생성할 수 있습니다.'
+                        : 'ESG 시나리오 계산까지 완료하면 Green Receipt를 생성할 수 있습니다.'}
+                    </p>
+                  </div>
+                  <button
+                    className="primary-button receipt-create-button"
+                    type="button"
+                    onClick={() => void createReceipt()}
+                    disabled={!canCreateReceipt || isBusy}
+                  >
+                    {isBusy ? 'Green Receipt 생성 중…' : 'Green Receipt 생성'}
+                    <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
+                  </button>
                 </div>
-                <button
-                  className="primary-button receipt-create-button"
-                  type="button"
-                  onClick={onCreateReceipt}
-                  disabled={!canCreateReceipt}
-                >
-                  Green Receipt 생성
-                  <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
-                </button>
-              </div>
+                <ApiErrorMessage
+                  error={receiptError}
+                  onRetry={createReceipt}
+                  retryDisabled={isBusy}
+                />
+              </>
             )}
 
             <button

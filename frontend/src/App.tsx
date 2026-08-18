@@ -1,11 +1,10 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ApiError, api } from './api/client'
+import { setSessionApiKey } from './api/sessionCredential'
 import {
-  confirmResource,
-  resetDemo,
-  runMatch,
-  saveDecision,
-  saveResourcePassport,
-} from './api/greenfabApi'
+  ApiBlockingState,
+  ApiCredentialGate,
+} from './components/ApiFeedback'
 import { ConfirmPage } from './pages/ConfirmPage'
 import { DetectPage } from './pages/DetectPage'
 import { MatchPage } from './pages/MatchPage'
@@ -16,10 +15,13 @@ import { ReviewPage } from './pages/ReviewPage'
 import type {
   CaseEnvelope,
   DecisionDraft,
-  EsgScenario,
-  Receipt,
   ResourcePassportDraft,
 } from './types/loop'
+import {
+  createCaseActionKey,
+  selectGoldenCase,
+  type IdempotentAction,
+} from './workflow'
 
 type AppView =
   | 'overview'
@@ -30,30 +32,147 @@ type AppView =
   | 'review'
   | 'receipt'
 
+const OPERATOR = 'demo_operator'
+const REVIEWER = 'demo_reviewer'
+
+const normalizeError = (error: unknown) =>
+  error instanceof ApiError
+    ? error
+    : new ApiError('예상하지 못한 오류가 발생했습니다.', {
+        status: 0,
+        code: 'UNKNOWN_ERROR',
+      })
+
+const keyScope = (caseId: string, action: IdempotentAction) =>
+  `${caseId}:${action}`
+
 function App() {
   const [view, setView] = useState<AppView>('overview')
   const [caseEnvelope, setCaseEnvelope] = useState<CaseEnvelope | null>(null)
-  const [esgScenario, setEsgScenario] = useState<EsgScenario | null>(null)
-  const [receipt, setReceipt] = useState<Receipt | null>(null)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [needsCredential, setNeedsCredential] = useState(false)
+  const [isMutating, setIsMutating] = useState(false)
+  const [requestError, setRequestError] = useState<ApiError | null>(null)
+  const mutationInFlight = useRef(false)
+  const idempotencyKeys = useRef(new Map<string, string>())
+
+  const loadInitialData = useCallback(async () => {
+    setIsInitialLoading(true)
+    setRequestError(null)
+    try {
+      const summaries = await api.listCases()
+      const goldenCase = selectGoldenCase(summaries)
+      const detail = await api.getCase(goldenCase.case_id)
+      setCaseEnvelope(detail)
+      setNeedsCredential(false)
+    } catch (error) {
+      const apiError = normalizeError(error)
+      setRequestError(apiError)
+      setNeedsCredential(
+        apiError.code === 'AUTH_REQUIRED' || apiError.code === 'FORBIDDEN',
+      )
+      setCaseEnvelope(null)
+    } finally {
+      setIsInitialLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadInitialData()
+  }, [loadInitialData])
 
   const changeView = (nextView: AppView) => {
     window.scrollTo({ top: 0 })
     setView(nextView)
   }
 
-  const startDemo = async () => {
-    const response = await resetDemo()
-    setCaseEnvelope(response)
-    setEsgScenario(null)
-    setReceipt(null)
-    changeView('detect')
+  const getStableKey = (caseId: string, action: IdempotentAction) => {
+    const scope = keyScope(caseId, action)
+    const existing = idempotencyKeys.current.get(scope)
+    if (existing) return existing
+    const next = createCaseActionKey(caseId, action)
+    idempotencyKeys.current.set(scope, next)
+    return next
   }
 
-  if (view === 'overview' || !caseEnvelope) {
-    return <OverviewPage onStartDemo={startDemo} />
+  const clearStableKey = (caseId: string, action: IdempotentAction) => {
+    idempotencyKeys.current.delete(keyScope(caseId, action))
+  }
+
+  const mutate = async (
+    operation: (current: CaseEnvelope) => Promise<CaseEnvelope>,
+  ): Promise<void> => {
+    if (!caseEnvelope || mutationInFlight.current) return
+    mutationInFlight.current = true
+    setIsMutating(true)
+    try {
+      setCaseEnvelope(await operation(caseEnvelope))
+    } catch (error) {
+      const apiError = normalizeError(error)
+      let displayError = apiError
+
+      if (apiError.status === 409) {
+        try {
+          const refreshed = await api.getCase(caseEnvelope.case.case_id)
+          setCaseEnvelope(refreshed)
+          displayError = new ApiError(
+            `${apiError.message} 화면을 서버의 최신 Case 상태로 갱신했습니다.`,
+            {
+              status: apiError.status,
+              code: apiError.code,
+              fieldErrors: apiError.fieldErrors,
+              traceId: apiError.traceId,
+            },
+          )
+        } catch {
+          // Preserve the original conflict and its trace ID when refresh fails.
+        }
+      }
+
+      if (apiError.code === 'AUTH_REQUIRED' || apiError.code === 'FORBIDDEN') {
+        setRequestError(apiError)
+        setNeedsCredential(true)
+      }
+      throw displayError
+    } finally {
+      mutationInFlight.current = false
+      setIsMutating(false)
+    }
+  }
+
+  if (needsCredential) {
+    return (
+      <ApiCredentialGate
+        error={requestError}
+        isConnecting={isInitialLoading}
+        onConnect={(apiKey) => {
+          setSessionApiKey(apiKey)
+          void loadInitialData()
+        }}
+      />
+    )
+  }
+
+  if (isInitialLoading || !caseEnvelope) {
+    return (
+      <ApiBlockingState
+        error={isInitialLoading ? null : requestError}
+        onRetry={() => void loadInitialData()}
+      />
+    )
   }
 
   const caseId = caseEnvelope.case.case_id
+
+  if (view === 'overview') {
+    return (
+      <OverviewPage
+        onStartDemo={async () => {
+          changeView('detect')
+        }}
+      />
+    )
+  }
 
   if (view === 'detect') {
     return (
@@ -71,12 +190,14 @@ function App() {
       <ConfirmPage
         caseData={caseEnvelope.case}
         resourceConfirmation={caseEnvelope.resource_confirmation}
-        onSelect={async (status) => {
-          const response = await confirmResource(caseId, status)
-          setCaseEnvelope(response)
-          setEsgScenario(null)
-          setReceipt(null)
-        }}
+        onSelect={(status) =>
+          mutate(() =>
+            api.confirmResource(caseId, {
+              status,
+              confirmed_by: OPERATOR,
+            }),
+          )
+        }
         onBackToDetect={() => changeView('detect')}
         onGoToPassport={() => {
           if (caseEnvelope.resource_confirmation.status === 'CONFIRMED') {
@@ -93,12 +214,14 @@ function App() {
         caseData={caseEnvelope.case}
         resourceConfirmation={caseEnvelope.resource_confirmation}
         resourcePassport={caseEnvelope.resource_passport}
-        onSave={async (draft: ResourcePassportDraft) => {
-          const response = await saveResourcePassport(caseId, draft)
-          setCaseEnvelope(response)
-          setEsgScenario(null)
-          setReceipt(null)
-        }}
+        onSave={(passport: ResourcePassportDraft) =>
+          mutate(async () => {
+            const result = await api.savePassport(caseId, passport, OPERATOR)
+            clearStableKey(caseId, 'match')
+            clearStableKey(caseId, 'receipt')
+            return result
+          })
+        }
         onBackToConfirm={() => changeView('confirm')}
         onGoToMatch={() => changeView('match')}
       />
@@ -110,12 +233,16 @@ function App() {
       <MatchPage
         resourcePassport={caseEnvelope.resource_passport}
         match={caseEnvelope.match}
-        onRunMatch={async () => {
-          const response = await runMatch(caseId)
-          setCaseEnvelope(response)
-          setEsgScenario(null)
-          setReceipt(null)
-        }}
+        onRunMatch={() =>
+          mutate(() =>
+            api.runMatch(
+              caseId,
+              { top_k: 3 },
+              OPERATOR,
+              getStableKey(caseId, 'match'),
+            ),
+          )
+        }
         onBackToPassport={() => changeView('passport')}
         onGoToReview={() => changeView('review')}
       />
@@ -127,11 +254,16 @@ function App() {
       <ReviewPage
         match={caseEnvelope.match}
         decision={caseEnvelope.decision}
-        onDecisionChange={async (draft: DecisionDraft) => {
-          const response = await saveDecision(caseId, draft)
-          setCaseEnvelope(response)
-          setReceipt(null)
-        }}
+        onDecisionChange={(decision: DecisionDraft) =>
+          mutate(async () => {
+            const result = await api.saveDecision(caseId, {
+              ...decision,
+              decided_by: REVIEWER,
+            })
+            clearStableKey(caseId, 'receipt')
+            return result
+          })
+        }
         onBack={() => changeView('match')}
         onGoToReceipt={() => changeView('receipt')}
       />
@@ -145,25 +277,22 @@ function App() {
       resourcePassport={caseEnvelope.resource_passport}
       match={caseEnvelope.match}
       decision={caseEnvelope.decision}
-      esgScenario={esgScenario}
-      receipt={receipt}
-      onEsgScenarioChange={setEsgScenario}
-      onCreateReceipt={() => {
-        const resourcePassport = caseEnvelope.resource_passport
-        const decision = caseEnvelope.decision
-        if (!resourcePassport || !decision || !esgScenario) return
-
-        setReceipt({
-          receipt_id: `RECEIPT-${caseEnvelope.case.case_id}`,
-          case_id: caseEnvelope.case.case_id,
-          passport_id: resourcePassport.passport_id,
-          selected_demand_id: decision.selected_demand_id,
-          decision_status: decision.status,
-          handoff_status:
-            decision.status === 'APPROVED' ? 'APPROVED' : 'RESOURCE_CONFIRMED',
-          created_at: new Date().toISOString(),
+      esgScenario={caseEnvelope.esg_scenario}
+      receipt={caseEnvelope.receipt}
+      isBusy={isMutating}
+      onGenerateEsgScenario={() =>
+        mutate(() => api.createEsgScenario(caseId, OPERATOR))
+      }
+      onCreateReceipt={() =>
+        mutate(async () => {
+          await api.createReceipt(
+            caseId,
+            OPERATOR,
+            getStableKey(caseId, 'receipt'),
+          )
+          return api.getReceipt(caseId)
         })
-      }}
+      }
       onBackToReview={() => changeView('review')}
     />
   )

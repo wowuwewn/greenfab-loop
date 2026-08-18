@@ -43,7 +43,7 @@ export function PriorityCaseCard({
           <div className="priority-shap">
             <div className="priority-shap__heading">
               <span>예측에 영향을 준 변수</span>
-              <small>REAL · SHAP</small>
+              <small>{priorityCase.source_type} · SHAP</small>
             </div>
             <dl>
               {priorityCase.shap_top_features.map((feature) => (
