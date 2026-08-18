@@ -21,6 +21,8 @@ env/
 ENV/
 __pycache__/
 *.py[cod]
+*.egg-info/
+*.ses
 .pytest_cache/
 .ruff_cache/
 .coverage

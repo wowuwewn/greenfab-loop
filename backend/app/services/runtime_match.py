@@ -199,8 +199,13 @@ class BgeM3ChromaAdapter:
             ) from exc
 
         if self.chroma_mode == "persistent":
+            from chromadb.config import Settings as ChromaSettings
+
             Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
-            return chromadb.PersistentClient(path=self.persist_directory)
+            return chromadb.PersistentClient(
+                path=self.persist_directory,
+                settings=ChromaSettings(anonymized_telemetry=False),
+            )
         if self.chroma_mode == "http":
             return chromadb.HttpClient(
                 host=self.host,

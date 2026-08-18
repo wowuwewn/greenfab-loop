@@ -126,6 +126,32 @@ def test_adapter_loads_model_once_and_keeps_only_demand_ids_in_chroma() -> None:
     assert adapter.list_ids() == {"D01"}
 
 
+def test_adapter_smoke_with_real_persistent_chroma(tmp_path) -> None:
+    pytest.importorskip("chromadb")
+    model = FakeModel()
+    adapter = BgeM3ChromaAdapter(
+        collection_name="greenfab-smoke",
+        persist_directory=str(tmp_path / "chroma"),
+        model_factory=lambda _model_name, _model_revision, _device: model,
+    )
+
+    assert (
+        adapter.upsert(
+            [
+                DemandIndexDocument("D01", "규소계 미분말"),
+                DemandIndexDocument("D15", "무기성 침전물"),
+            ]
+        )
+        == 2
+    )
+    assert adapter.list_ids() == {"D01", "D15"}
+
+    hits = adapter.search("실리콘 분말", top_k=2)
+    assert len(hits) == 2
+    assert {hit.demand_id for hit in hits} == {"D01", "D15"}
+    assert all(-1 <= hit.semantic_similarity <= 1 for hit in hits)
+
+
 def test_adapter_rejects_nonempty_collection_from_another_embedding_model() -> None:
     collection = FakeCollection()
     collection.documents["OLD"] = "legacy embedding"
