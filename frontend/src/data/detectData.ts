@@ -1,15 +1,8 @@
 import type {
   DetectAnalysis,
-  DetectCase,
-  ResourceConfirmation,
   ValidationMetrics,
   WorkflowStep,
 } from '../types/loop'
-import dashboardData from '../../../data/outputs/detect/dashboard_data.json'
-
-const priorityArtifact = dashboardData.risk_items.find(
-  (item) => item.id === 'SECOM-0116',
-)
 
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   { id: '01', label: '위험 선별' },
@@ -27,24 +20,6 @@ export const DETECT_ANALYSIS: DetectAnalysis = {
   defect_cases: 104,
   captured_defects_top_20: 56,
   capture_rate_top_20: 53.85,
-}
-
-export const PRIORITY_CASE: DetectCase = {
-  case_id: 'SECOM-0116',
-  risk_rank: 4,
-  shap_top_features:
-    priorityArtifact?.top_factors.slice(0, 3).map((factor) => ({
-      feature_name: factor.display_feature,
-      shap_value: factor.contribution,
-    })) ?? null,
-  source_type: 'REAL',
-}
-
-export const RESOURCE_CONFIRMATION: ResourceConfirmation = {
-  status: 'PENDING',
-  confirmed_by: null,
-  confirmed_at: null,
-  source_type: 'DEMO',
 }
 
 export const VALIDATION_METRICS: ValidationMetrics = {

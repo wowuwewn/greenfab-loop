@@ -22,6 +22,24 @@ export function PriorityCaseCard({
   resourceConfirmation,
   onGoToConfirm,
 }: PriorityCaseCardProps) {
+  const confirmationPresentation = {
+    PENDING: {
+      currentStatus: '실제 자원 발생 여부 확인 전',
+      nextStep: '담당자가 실제 자원 발생 여부를 확인합니다.',
+      buttonLabel: '확인 단계로 이동',
+    },
+    CONFIRMED: {
+      currentStatus: '실제 자원 발생 확인 완료',
+      nextStep: '확인된 자원 정보를 Passport에 정리합니다.',
+      buttonLabel: '현장 확인 결과 보기',
+    },
+    NOT_CONFIRMED: {
+      currentStatus: '자원 미발생 확인 · 검토 종료',
+      nextStep: '종료된 Case이며 확인 결과를 조회할 수 있습니다.',
+      buttonLabel: '종료 결과 보기',
+    },
+  }[resourceConfirmation.status]
+
   return (
     <section className="priority-card" aria-labelledby="priority-title">
       <div className="priority-card__topline">
@@ -63,15 +81,11 @@ export function PriorityCaseCard({
       <div className="action-details">
         <div>
           <span>현재 상태</span>
-          <p>
-            {resourceConfirmation.status === 'PENDING'
-              ? '실제 자원 발생 여부 확인 전'
-              : '확인 결과 기록됨'}
-          </p>
+          <p>{confirmationPresentation.currentStatus}</p>
         </div>
         <div>
           <span>다음 단계</span>
-          <p>담당자가 실제 자원 발생 여부를 확인합니다.</p>
+          <p>{confirmationPresentation.nextStep}</p>
         </div>
       </div>
 
@@ -80,7 +94,7 @@ export function PriorityCaseCard({
         type="button"
         onClick={onGoToConfirm}
       >
-        확인 단계로 이동
+        {confirmationPresentation.buttonLabel}
         <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
       </button>
     </section>

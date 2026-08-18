@@ -32,7 +32,7 @@ describe('GreenFab API client', () => {
 
     await expect(api.listCases()).resolves.toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE_URL}/api/v1/cases`,
+      `${API_BASE_URL}/api/v1/cases?limit=100&offset=0`,
       expect.objectContaining({ headers: expect.any(Headers) }),
     )
   })

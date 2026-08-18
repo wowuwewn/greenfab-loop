@@ -1,8 +1,10 @@
 # GreenFab Loop frontend
 
 재원님이 설계한 GreenFab Loop 화면을 FastAPI 워크플로 API에 연결한 React/Vite
-클라이언트입니다. 화면의 UCI SECOM 모델 지표는 Golden Case `SECOM-0116` 전용이므로,
-서버에 해당 Case가 없을 때 다른 Case를 임의로 대신 표시하지 않습니다.
+클라이언트입니다. API에서 받은 위험 Case를 운영 큐로 보여주며, 사용자는 Case별
+현재 상태와 다음 작업을 확인하고 독립적으로 워크플로를 진행할 수 있습니다.
+`SECOM-0116`은 진행 가능한 경우 시연 추천 Case로 표시할 뿐 유일한 실행 대상은
+아닙니다. 종료된 Case는 결과만 조회할 수 있습니다.
 
 ## 로컬 실행
 
@@ -24,12 +26,16 @@ VITE_API_BASE_URL=https://your-api.example.com
 
 ## API 흐름
 
-1. `GET /api/v1/cases`에서 Case 목록을 받고 `SECOM-0116`을 확인합니다.
-2. `GET /api/v1/cases/SECOM-0116`의 `CaseEnvelope`로 전체 화면 상태를 채웁니다.
-3. 현장 확인, Passport, Match, Decision, ESG Scenario, Receipt 요청이 성공할 때마다
+1. `GET /api/v1/cases?limit=100&offset=0`에서 검토 Case 목록과 현재 상태를 받습니다.
+2. 진행 가능한 `SECOM-0116`을 우선 안내하고, 이미 종료됐다면 상태·순위 규칙에 따라
+   다음 진행 가능한 Case를 안내합니다. 사용자는 운영 큐에서 다른 Case도 선택할 수 있습니다.
+3. `GET /api/v1/cases/{case_id}`의 `CaseEnvelope`로 선택 Case의 상세 화면을 채웁니다.
+4. 현장 확인, Passport, Match, Decision, ESG Scenario, Receipt 요청이 성공할 때마다
    서버가 반환한 최신 `CaseEnvelope`로 로컬 상태를 통째로 교체합니다.
-4. Match와 Receipt는 Case/작업별로 안정적인 `Idempotency-Key`를 재시도에 재사용합니다.
-5. `409` 응답은 Case를 다시 조회하고, `422` field errors와 `503` trace ID를 UI에
+5. 목록 응답에는 단계 상태가 있으므로 변경 성공 및 `409` 충돌 뒤 목록을 다시 조회해
+   운영 큐와 상세 화면을 동기화합니다.
+6. Match와 Receipt는 Case/작업별로 안정적인 `Idempotency-Key`를 재시도에 재사용합니다.
+7. `409` 응답은 Case를 다시 조회하고, `422` field errors와 `503` trace ID를 UI에
    표시합니다.
 
 모든 API 요청에는 사용자가 입력한 키가 `X-API-Key`로 전송됩니다. Passport/Match/ESG
