@@ -119,6 +119,7 @@ function App() {
         decision={decision}
         esgScenario={esgScenario}
         receipt={receipt}
+        onEsgScenarioChange={setEsgScenario}
         onCreateReceipt={() => {
           if (!resourcePassport || !decision) return
 

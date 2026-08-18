@@ -7,6 +7,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { WorkflowStepper } from '../components/WorkflowStepper'
+import { EsgScenarioForm } from '../components/EsgScenarioForm'
 import { WORKFLOW_STEPS } from '../data/detectData'
 import type {
   Decision,
@@ -29,6 +30,7 @@ interface ReceiptPageProps {
   decision: Decision | null
   esgScenario: EsgScenario | null
   receipt: Receipt | null
+  onEsgScenarioChange: (scenario: EsgScenario) => void
   onCreateReceipt: () => void
   onBackToReview: () => void
 }
@@ -103,6 +105,7 @@ export function ReceiptPage({
   decision,
   esgScenario,
   receipt,
+  onEsgScenarioChange,
   onCreateReceipt,
   onBackToReview,
 }: ReceiptPageProps) {
@@ -297,24 +300,15 @@ export function ReceiptPage({
                 <span className="receipt-badge receipt-badge--scenario">SCENARIO</span>
                 <h2 id="esg-title">ESG 시나리오</h2>
               </div>
+              <p>
+                사용자 입력값과 입력된 계수를 기준으로 기존 처리 경로와 순환
+                경로의 예상 차이를 계산합니다.
+              </p>
             </div>
-            {esgScenario ? (
-              <div className="esg-state">
-                <strong>ESG 시나리오 계산 기준 연결됨</strong>
-                <dl>
-                  <div><dt>계산식 버전</dt><dd>{esgScenario.formula_version ?? '미입력'}</dd></div>
-                  <div><dt>환산계수 출처</dt><dd>{esgScenario.factor_source ?? '미입력'}</dd></div>
-                </dl>
-              </div>
-            ) : (
-              <div className="esg-state is-pending">
-                <strong>ESG 계산 기준 연결 전</strong>
-                <p>
-                  사용자 입력값과 검증된 계산식이 확정되면 예상 에너지·폐기물·탄소
-                  손실/절감 시나리오를 이 영역에 기록합니다.
-                </p>
-              </div>
-            )}
+            <EsgScenarioForm
+              esgScenario={esgScenario}
+              onCalculate={onEsgScenarioChange}
+            />
           </section>
 
           <section className="receipt-section green-receipt" aria-labelledby="green-receipt-title">
