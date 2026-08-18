@@ -45,11 +45,13 @@ from app.services.demand import (
     update_demand,
 )
 from app.services.evidence import (
-    add_passport_evidence,
+    attach_passport_evidence,
     delete_evidence_safely,
     evidence_storage_keys_for_case,
     get_passport_evidence,
     list_passport_evidence,
+    open_verified_evidence,
+    preflight_passport_evidence_target,
     to_evidence_out,
 )
 from app.services.match import DemandIndexManager, IndexSyncResult, MatchProvider
@@ -619,26 +621,32 @@ def upload_passport_evidence(
     description: Annotated[str | None, Form(max_length=2000)] = None,
 ) -> PassportEvidenceOut:
     storage = _evidence_storage(request)
-    evidence = None
+    stored = None
     try:
         with db.begin():
-            evidence = add_passport_evidence(
+            preflight_passport_evidence_target(db, case_id)
+        normalized_media_type = (file.content_type or "").split(";", 1)[0].strip().casefold()
+        stored = storage.save(
+            file.file,
+            media_type=normalized_media_type,
+            max_bytes=settings.evidence_max_bytes,
+        )
+        with db.begin():
+            evidence = attach_passport_evidence(
                 db,
-                storage,
                 case_id,
-                stream=file.file,
+                stored=stored,
                 filename=file.filename,
-                media_type=file.content_type,
+                media_type=normalized_media_type,
                 evidence_type=evidence_type,
                 description=description,
                 actor=principal.actor,
-                max_bytes=settings.evidence_max_bytes,
                 trace_id=_trace_id(request),
             )
             result = to_evidence_out(evidence)
     except Exception:
-        if evidence is not None:
-            delete_evidence_safely(storage, evidence.storage_key)
+        if stored is not None:
+            delete_evidence_safely(storage, stored.storage_key)
         raise
     finally:
         file.file.close()
@@ -669,8 +677,19 @@ def download_passport_evidence(
     _principal: ViewerPrincipal,
 ) -> StreamingResponse:
     evidence = get_passport_evidence(db, case_id, evidence_id)
+    storage_key = evidence.storage_key
+    original_filename = evidence.original_filename
+    media_type = evidence.media_type
+    size_bytes = evidence.size_bytes
+    sha256 = evidence.sha256
+    db.rollback()
     storage = _evidence_storage(request)
-    storage_context = storage.open(evidence.storage_key)
+    storage_context = open_verified_evidence(
+        storage,
+        storage_key=storage_key,
+        expected_size=size_bytes,
+        expected_sha256=sha256,
+    )
     stream = storage_context.__enter__()
     try:
         first_chunk = stream.read(64 * 1024)
@@ -687,11 +706,17 @@ def download_passport_evidence(
         finally:
             storage_context.__exit__(None, None, None)
 
-    encoded_filename = quote(evidence.original_filename, safe="")
+    encoded_filename = quote(original_filename, safe="")
     return StreamingResponse(
         content_chunks(),
-        media_type=evidence.media_type,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+            "Content-Length": str(size_bytes),
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

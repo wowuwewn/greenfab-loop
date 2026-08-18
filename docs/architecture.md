@@ -155,7 +155,8 @@ MatchProvider.match(passport, top_k) -> MatchResult
 - 잘못된 단계 요청은 `409 INVALID_STATE`로 거절합니다.
 - Match와 Receipt는 선택적 `Idempotency-Key`를 지원하며 UI에서는 매번 전송하는 것을 권장합니다. Match의 오래된 PENDING lease는 새 execution token으로 안전하게 회수하고, 이전 inference 결과는 거부합니다.
 - Scenario는 Case당 하나만 저장하고 재요청 시 같은 결과를 반환합니다.
-- PostgreSQL 또는 Evidence storage 접근이 실패하면 readiness가 실패합니다. 응답은 주입된 Provider class 이름도 함께 표시합니다.
+- PostgreSQL 또는 Evidence storage 접근이 실패하면 deep readiness가 실패합니다. 외부 platform의
+  restart probe는 process liveness만 보는 `/health/live`를 사용합니다. 응답은 주입된 Provider class 이름도 함께 표시합니다.
 - 미완성 객체를 저장하고 성공 응답을 반환하지 않습니다.
 - 모든 오류 응답에는 추적 가능한 `trace_id`를 포함합니다.
 - 같은 Case와 같은 Demand의 동시 상태 전이는 PostgreSQL row lock으로 직렬화합니다. embedded BGE/Chroma index 연산은 현재 프로세스 안에서만 직렬화되므로 단일 API worker 배포를 사용해야 합니다. 다중 worker에는 PostgreSQL advisory lock 또는 전용 index worker가 필요합니다.
@@ -188,13 +189,13 @@ chroma       BGE HTTP mode에서 Compose match profile로 선택 구성
 - 실제 인계 완료를 확인하는 외부 증빙
 - 검증되지 않은 탄소·전력·폐기물 감축계수
 - 멀티테넌시, SSO/OIDC와 세분화된 resource-level 권한 관리
-- Evidence의 운영 object storage·malware scan·retention
+- Evidence의 malware scan·retention·orphan reconcile
 
 ## 11. 후속 구현 TODO
 
 - 운영 SSO/OIDC·조직 tenant와 API key rotation/revocation
 - Detect import scheduler와 MES/QMS connector
-- Evidence object storage, malware scan, retention/deletion worker
+- Evidence malware scan, retention/deletion 및 orphan reconcile worker
 - Demand index event의 자동 재시도 worker·backoff·운영 관측
 - 다중 API worker용 분산 index lock 또는 단일 전용 index worker
 - 실제 인계 증빙이 필요할 경우 별도의 정책·API·법적 검토

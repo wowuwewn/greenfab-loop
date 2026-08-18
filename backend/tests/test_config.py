@@ -135,3 +135,30 @@ def test_production_requires_managed_evidence_storage() -> None:
 def test_s3_storage_requires_credentials() -> None:
     with pytest.raises(ValidationError, match="EVIDENCE_S3_BUCKET"):
         Settings(evidence_storage_backend="s3")
+
+
+def test_production_s3_endpoint_requires_https_but_local_minio_allows_http() -> None:
+    credentials = {
+        **PRODUCTION_STORAGE,
+        "evidence_s3_endpoint_url": "http://object-storage.internal:9000",
+    }
+    with pytest.raises(ValidationError, match="must use HTTPS"):
+        Settings(
+            environment="production",
+            demo_mode=False,
+            seed_demo_data=False,
+            demo_reset_enabled=False,
+            auth_mode="required",
+            api_key_credentials=[
+                ApiKeyCredential(
+                    key_id="production-admin",
+                    secret_sha256="a" * 64,
+                    actor="production_admin",
+                    role=ApiRole.ADMIN,
+                )
+            ],
+            **credentials,
+        )
+
+    local = Settings(environment="local", **credentials)
+    assert local.evidence_s3_endpoint_url == "http://object-storage.internal:9000"

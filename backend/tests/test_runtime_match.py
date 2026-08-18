@@ -39,6 +39,7 @@ class FakeModel:
 class FakeCollection:
     def __init__(self) -> None:
         self.documents: dict[str, str] = {}
+        self.metadata_by_id: dict[str, dict[str, object]] = {}
         self.last_query = None
         self.last_metadatas = None
 
@@ -50,14 +51,20 @@ class FakeCollection:
         assert len(embeddings) == len(ids)
         self.last_metadatas = metadatas
         self.documents.update(dict(zip(ids, documents, strict=True)))
+        self.metadata_by_id.update(dict(zip(ids, metadatas, strict=True)))
 
     def delete(self, *, ids):
         for demand_id in ids:
             self.documents.pop(demand_id, None)
+            self.metadata_by_id.pop(demand_id, None)
 
     def get(self, *, include):
-        assert include == []
-        return {"ids": list(self.documents)}
+        assert include in ([], ["metadatas"])
+        ids = list(self.documents)
+        response = {"ids": ids}
+        if include == ["metadatas"]:
+            response["metadatas"] = [self.metadata_by_id.get(demand_id) for demand_id in ids]
+        return response
 
     def query(self, **kwargs):
         self.last_query = kwargs
@@ -134,6 +141,7 @@ def test_adapter_loads_model_once_and_keeps_only_demand_ids_in_chroma() -> None:
     )
     assert indexed == 2
     assert adapter.list_ids() == {"D01", "D15"}
+    assert adapter.list_indexed_documents()["D15"] == (2, "a" * 64)
     assert collection.last_metadatas[1]["demand_version"] == 2
     assert collection.last_metadatas[1]["demand_content_sha256"] == "a" * 64
     hits = adapter.search("실리콘 분말", top_k=3)
@@ -257,6 +265,7 @@ class FakeAdapter:
 
     def __init__(self) -> None:
         self.ids = {"STALE"}
+        self.indexed: dict[str, tuple[int | None, str | None]] = {"STALE": (1, "stale")}
         self.upserts: list[list[str]] = []
 
     def ready(self):
@@ -273,15 +282,25 @@ class FakeAdapter:
         ids = [document.demand_id for document in documents]
         self.upserts.append(ids)
         self.ids.update(ids)
+        self.indexed.update(
+            {
+                document.demand_id: (document.version, document.content_sha256)
+                for document in documents
+            }
+        )
         return len(ids)
 
     def delete(self, demand_ids):
         for demand_id in demand_ids:
             self.ids.discard(demand_id)
+            self.indexed.pop(demand_id, None)
         return len(demand_ids)
 
     def list_ids(self):
         return set(self.ids)
+
+    def list_indexed_documents(self):
+        return dict(self.indexed)
 
 
 class FakeCatalog:
@@ -323,14 +342,24 @@ class FakeCatalog:
 
     def list_active_documents(self):
         return [
-            DemandIndexDocument(demand_id, snapshot.demand_description)
+            DemandIndexDocument(
+                demand_id,
+                snapshot.demand_description,
+                version=snapshot.version,
+                content_sha256=snapshot.content_sha256,
+            )
             for demand_id, snapshot in self.snapshots.items()
         ]
 
     def load_active_document(self, demand_id):
         snapshot = self.snapshots.get(demand_id)
         return (
-            DemandIndexDocument(demand_id, snapshot.demand_description)
+            DemandIndexDocument(
+                demand_id,
+                snapshot.demand_description,
+                version=snapshot.version,
+                content_sha256=snapshot.content_sha256,
+            )
             if snapshot is not None
             else None
         )
@@ -359,6 +388,7 @@ def test_real_provider_hydrates_postgres_rules_and_reconciles_stale_ids() -> Non
 
     assert provider.sync_all_demands() == IndexSyncResult(upserted=2, deleted=1)
     assert adapter.ids == {"D01", "D15"}
+    assert provider.sync_all_demands() == IndexSyncResult(upserted=0, deleted=0)
 
 
 def test_real_provider_marks_match_demo_when_any_demand_is_demo() -> None:

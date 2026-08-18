@@ -129,8 +129,9 @@ DB와 API 모두 `(quantity, unit)` 양방향 pair를 강제합니다. 즉 수�
 | `source_type` | `VARCHAR` | `REAL`, `DEMO` |
 | `uploaded_by`, `created_at` | `VARCHAR`, `TIMESTAMPTZ` | 인증 actor와 시각 |
 
-Binary는 DB나 Git에 저장하지 않습니다. 현재 local storage는 개발 전용이며 운영 object storage
-수명주기와 DB cascade의 binary cleanup은 별도 adapter/job으로 보강해야 합니다.
+Binary는 DB나 Git에 저장하지 않습니다. Local adapter는 개발 전용이고 production은
+S3-compatible private object storage adapter를 강제합니다. malware scan, object lifecycle과
+DB cascade 이후 binary/orphan cleanup은 별도 job으로 보강해야 합니다.
 
 ### `demands`
 
@@ -221,7 +222,7 @@ Unique:
 
 ### `demand_index_events`
 
-Demand 변경과 Chroma side effect 사이의 복구 가능한 최소 outbox/audit입니다. `UPSERT`, `DELETE`, `SYNC_ALL` 작업과 `PENDING`, `SUCCEEDED`, `FAILED`, `SKIPPED` 상태, principal actor, 대상 Demand version/hash, attempt count, 안전한 오류 유형, trace/time을 저장합니다. 현재 요청이 commit 후 동기화를 한 번 실행합니다. 실패·건너뜀 event는 새 event로 수동 재시도할 수 있고, crash 후 남은 `PENDING`은 관리자 전체 sync로 복구합니다. 자동 retry/backoff worker는 후속 범위입니다.
+Demand 변경과 Chroma side effect 사이의 복구 가능한 최소 outbox/audit입니다. `UPSERT`, `DELETE`, `SYNC_ALL` 작업과 `PENDING`, `SUCCEEDED`, `FAILED`, `SKIPPED` 상태, principal actor, 대상 Demand version/hash, attempt count, 안전한 오류 유형, trace/time을 저장합니다. 현재 요청이 commit 후 동기화를 한 번 실행합니다. 실패·건너뜀 event는 새 event로 수동 재시도할 수 있고, crash 후 남은 `PENDING`은 startup에서 FAILED로 전환한 뒤 새 SYNC_ALL event로 reconcile합니다. 자동 retry/backoff worker는 후속 범위입니다.
 
 ### `esg_scenarios`
 
@@ -316,7 +317,7 @@ ChromaDB 자체는 PostgreSQL migration 대상이 아니며 선택한 BGE Provid
 4. Chroma 검색 ID를 PostgreSQL Demand와 조인하고 version/hash가 모두 존재하며 같은 hit만 API 후보로 반환합니다. lineage가 없는 legacy hit는 wildcard로 인정하지 않습니다.
 5. Case, Decision, Receipt, 사용자 정보를 Chroma에 저장하지 않습니다.
 
-Demand create/update/deactivate API는 PostgreSQL transaction에 `demand_index_events`를 함께 저장하고 commit 후 Chroma upsert/delete를 수행합니다. 외부 index 실패 시 PostgreSQL 변경과 FAILED event가 보존되고 API가 `503 DEMAND_INDEX_UNAVAILABLE`로 알립니다. 시작·Demo reset 또는 `POST /api/v1/demands/index/sync`로 활성 전체를 upsert하고 stale ID를 삭제할 수 있습니다. embedded BGE/Chroma 연산은 한 프로세스 안에서 직렬화되고 단건 event도 PostgreSQL 최신 상태를 다시 읽지만, 여러 API worker의 완전한 분산 직렬화는 아직 지원하지 않으므로 BGE embedded 배포는 단일 worker를 사용합니다.
+Demand create/update/deactivate API는 PostgreSQL transaction에 `demand_index_events`를 함께 저장하고 commit 후 Chroma upsert/delete를 수행합니다. 외부 index 실패 시 PostgreSQL 변경과 FAILED event가 보존되고 API가 `503 DEMAND_INDEX_UNAVAILABLE`로 알립니다. 시작·Demo reset 또는 `POST /api/v1/demands/index/sync`는 PostgreSQL version/content hash와 Chroma metadata를 비교해 변경·누락 문서만 upsert하고 stale ID를 삭제합니다. embedded BGE/Chroma 연산은 한 프로세스 안에서 직렬화되고 단건 event도 PostgreSQL 최신 상태를 다시 읽지만, 여러 API worker의 완전한 분산 직렬화는 아직 지원하지 않으므로 BGE embedded 배포는 단일 worker를 사용합니다.
 
 ## 7. Migration과 테스트
 
@@ -338,5 +339,5 @@ Demand create/update/deactivate API는 PostgreSQL transaction에 `demand_index_e
 - PostgreSQL lock timeout·deadlock 관찰과 다중 worker 부하 테스트
 - 개인정보 보존·삭제와 DB backup 정책
 - 실제 인계 증빙이 필요한 경우 별도 도메인·법적 설계
-- 운영 object storage, malware scan, retention/deletion worker
+- Evidence malware scan, retention/deletion 및 orphan reconcile worker
 - 실제 inference wall-clock timeout과 multi-worker 부하 제어

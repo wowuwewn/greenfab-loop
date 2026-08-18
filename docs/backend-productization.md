@@ -95,9 +95,15 @@ curl -X POST http://localhost:8000/api/v1/cases/SECOM-0116/resource-passport/evi
 - Upload는 Passport 저장 후 Decision 전인 `PASSPORT_READY`, `MATCH_READY`에서만 허용합니다.
 - Evidence 추가는 Workflow 상태를 바꾸지 않고 Audit Event를 남깁니다.
 - Demo reset은 Golden Case의 local evidence 파일도 best-effort로 제거하고 실패를 서버 log에 남깁니다.
+- Object 저장은 DB transaction과 Case row lock 밖에서 수행하고 최종 attach 시 Workflow 상태를
+  다시 검사합니다. attach 실패 시 저장 object를 best-effort로 보상 삭제합니다.
+- Download는 metadata의 size와 SHA-256을 전부 검증한 뒤 전송하며 private/no-store와
+  `X-Content-Type-Options: nosniff`를 반환합니다.
 
-현재 `LocalEvidenceStorage`는 로컬 개발 전용입니다. 운영 전에는 object storage, malware scan,
-encryption/KMS, retention/deletion job, signed download 또는 proxy 정책을 구현해야 합니다.
+`LocalEvidenceStorage`는 로컬 개발 전용이며 production은 S3-compatible private storage를
+강제합니다. 시작 시 bucket과 임시 object Put/Get/Delete 권한을 점검하고 bounded timeout/retry를
+사용합니다. 운영 전에는 malware scan, encryption/KMS, retention/deletion 및 orphan reconcile
+job을 구성해야 합니다.
 애플리케이션 저장 제한과 별개로 ingress/reverse proxy에도 multipart body 제한을 설정해야 합니다.
 첨부는 사실 자료일 뿐 법적 검증이나 인계 증명이 아닙니다.
 
@@ -152,7 +158,9 @@ index event를 새로 만들지 않습니다.
 - 공통 오류 shape에 401, 403, 413을 추가
 - `MATCH_PENDING_TIMEOUT_SECONDS`: 기본 120초, crash로 남은 PENDING Match lease 회수 기준
 
-실제 BGE/Chroma provider readiness가 포함됩니다. 운영 object storage readiness, rate limit, SSO, backup과 observability는 별도 운영 작업입니다.
+실제 BGE/Chroma provider readiness와 Evidence storage deep probe가 포함됩니다. 외부 플랫폼의
+자동 restart probe는 `/health/live`를 사용하고 `/health/ready`는 수동·외부 deep check로
+모니터링합니다. rate limit, SSO, backup과 observability는 별도 운영 작업입니다.
 
 ## 7. Migration
 

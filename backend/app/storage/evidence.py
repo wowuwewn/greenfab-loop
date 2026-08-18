@@ -9,6 +9,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from tempfile import SpooledTemporaryFile
+from threading import Lock
 from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, runtime_checkable
 from uuid import uuid4
 
@@ -161,10 +162,15 @@ class S3EvidenceStorage:
         secret_access_key: str | None = None,
         session_token: str | None = None,
         addressing_style: str = "auto",
+        connect_timeout_seconds: int = 3,
+        read_timeout_seconds: int = 10,
+        max_attempts: int = 2,
         client: Any | None = None,
     ) -> None:
         self.bucket = bucket.strip()
         self.prefix = prefix.strip().strip("/")
+        self._ready_lock = Lock()
+        self._permissions_verified = False
         if not self.bucket:
             raise ValueError("S3 bucket is required")
         self._client = client or self._build_client(
@@ -174,6 +180,9 @@ class S3EvidenceStorage:
             secret_access_key=secret_access_key,
             session_token=session_token,
             addressing_style=addressing_style,
+            connect_timeout_seconds=connect_timeout_seconds,
+            read_timeout_seconds=read_timeout_seconds,
+            max_attempts=max_attempts,
         )
 
     def save(self, stream: BinaryIO, *, media_type: str, max_bytes: int) -> StoredEvidence:
@@ -271,12 +280,49 @@ class S3EvidenceStorage:
     def check_ready(self) -> None:
         try:
             self._client.head_bucket(Bucket=self.bucket)
+            if not self._permissions_verified:
+                with self._ready_lock:
+                    if not self._permissions_verified:
+                        self._verify_object_permissions()
+                        self._permissions_verified = True
         except Exception as exc:
+            if isinstance(exc, DomainError):
+                raise
             raise DomainError(
                 "EVIDENCE_STORAGE_UNAVAILABLE",
                 "Evidence storage를 사용할 수 없습니다.",
                 503,
             ) from exc
+
+    def _verify_object_permissions(self) -> None:
+        payload = b"greenfab-evidence-storage-ready"
+        storage_key = f"health/{uuid4().hex}.probe"
+        object_key = self._object_key(storage_key)
+        created = False
+        body: Any | None = None
+        try:
+            self._client.put_object(
+                Bucket=self.bucket,
+                Key=object_key,
+                Body=payload,
+                ContentType="application/octet-stream",
+            )
+            created = True
+            response = self._client.get_object(Bucket=self.bucket, Key=object_key)
+            body = response.get("Body")
+            if body is None or not hasattr(body, "read") or body.read(len(payload) + 1) != payload:
+                raise RuntimeError("S3 Evidence readiness probe returned unexpected content")
+            self._client.delete_object(Bucket=self.bucket, Key=object_key)
+            created = False
+        finally:
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
+            if created:
+                try:
+                    self._client.delete_object(Bucket=self.bucket, Key=object_key)
+                except Exception:
+                    pass
 
     def _object_key(self, storage_key: str) -> str:
         _validate_relative_storage_key(storage_key)
@@ -291,6 +337,9 @@ class S3EvidenceStorage:
         secret_access_key: str | None,
         session_token: str | None,
         addressing_style: str,
+        connect_timeout_seconds: int,
+        read_timeout_seconds: int,
+        max_attempts: int,
     ) -> Any:
         try:
             import boto3
@@ -306,7 +355,13 @@ class S3EvidenceStorage:
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
             aws_session_token=session_token,
-            config=Config(s3={"addressing_style": addressing_style}),
+            config=Config(
+                connect_timeout=connect_timeout_seconds,
+                read_timeout=read_timeout_seconds,
+                retries={"mode": "standard", "total_max_attempts": max_attempts},
+                tcp_keepalive=True,
+                s3={"addressing_style": addressing_style},
+            ),
         )
 
 
@@ -334,6 +389,9 @@ def build_evidence_storage(settings: Settings) -> EvidenceStorage:
             else None
         ),
         addressing_style=settings.evidence_s3_addressing_style,
+        connect_timeout_seconds=settings.evidence_s3_connect_timeout_seconds,
+        read_timeout_seconds=settings.evidence_s3_read_timeout_seconds,
+        max_attempts=settings.evidence_s3_max_attempts,
     )
 
 

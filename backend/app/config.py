@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     evidence_s3_secret_access_key: SecretStr | None = None
     evidence_s3_session_token: SecretStr | None = None
     evidence_s3_addressing_style: Literal["auto", "path", "virtual"] = "auto"
+    evidence_s3_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)
+    evidence_s3_read_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    evidence_s3_max_attempts: int = Field(default=2, ge=1, le=5)
     evidence_max_bytes: int = Field(default=5 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
     detect_artifact_max_bytes: int = Field(
         default=20 * 1024 * 1024,
@@ -178,6 +181,14 @@ class Settings(BaseSettings):
                 raise ValueError("EVIDENCE_S3_ACCESS_KEY_ID is required for s3 storage")
             if self.evidence_s3_secret_access_key is None:
                 raise ValueError("EVIDENCE_S3_SECRET_ACCESS_KEY is required for s3 storage")
+            if (
+                environment not in demo_environments
+                and self.evidence_s3_endpoint_url
+                and not self.evidence_s3_endpoint_url.casefold().startswith("https://")
+            ):
+                raise ValueError(
+                    "EVIDENCE_S3_ENDPOINT_URL must use HTTPS outside local environments"
+                )
         return self
 
 
